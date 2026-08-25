@@ -7,15 +7,12 @@ from typing import List, Dict, Any, Optional
 from tqdm.asyncio import tqdm
 import ujson as json
 
-# ==========================================
-# CẤU HÌNH (CONFIG)
-# ==========================================
-INPUT_FILE = "product_ids.txt"  # File chứa danh sách ID (mỗi dòng 1 ID)
-OUTPUT_DIR = "./output_data"  # Thư mục lưu các file JSON
-BATCH_SIZE = 1000  # Số sản phẩm trên mỗi file JSON
-CONCURRENCY_LIMIT = 40  # Số request đồng thời (Khuyên dùng: 30 - 50 để tránh bị block)
-MAX_RETRIES = 3  # Số lần thử lại tối đa khi gặp lỗi
-REQUEST_TIMEOUT = 12  # Timeout mỗi request (giây)
+INPUT_FILE = "./txt_files/products-01.txt"
+OUTPUT_DIR = "./output_data"
+BATCH_SIZE = 1000
+CONCURRENCY_LIMIT = 40
+MAX_RETRIES = 3
+REQUEST_TIMEOUT = 12
 
 # Headers giả lập trình duyệt
 HEADERS = {
