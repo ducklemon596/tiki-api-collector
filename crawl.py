@@ -6,15 +6,67 @@ import aiohttp
 from typing import List, Dict, Any, Optional
 from tqdm.asyncio import tqdm
 import ujson as json
+import logging
+import os
+
+from RateLimit import RateLimiter
+
+# ==========================================
+# CẤU HÌNH LOGGING ĐA LUỒNG
+# ==========================================
+
+# 1. Logger tổng hợp mọi sự kiện (Event History)
+event_logger = logging.getLogger("event_logger")
+event_logger.setLevel(logging.INFO)
+
+event_handler = logging.FileHandler("events_history.log", encoding="utf-8")
+event_handler.setFormatter(
+    logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+)
+
+event_logger.addHandler(event_handler)
+
+# 2. Logger chỉ ghi ID lỗi ra file CSV
+error_logger = logging.getLogger("error_logger")
+error_logger.setLevel(logging.ERROR)
+
+error_handler = logging.FileHandler("failed_products.csv", encoding="utf-8")
+error_handler.setFormatter(logging.Formatter("%(asctime)s,%(message)s"))
+
+error_logger.addHandler(error_handler)
+
+if (
+    not os.path.exists("failed_products.csv")
+    or os.path.getsize("failed_products.csv") == 0
+):
+    with open("failed_products.csv", "w", encoding="utf-8") as f:
+        f.write("timestamp,product_id,error_reason\n")
+
+# 3. Logger chỉ ghi ID thành công ra file CSV
+success_logger = logging.getLogger("success_logger")
+success_logger.setLevel(logging.INFO)
+
+success_handler = logging.FileHandler("successful_products.csv", encoding="utf-8")
+success_handler.setFormatter(logging.Formatter("%(asctime)s,%(message)s"))
+
+success_logger.addHandler(success_handler)
+
+if (
+    not os.path.exists("successful_products.csv")
+    or os.path.getsize("successful_products.csv") == 0
+):
+    with open("successful_products.csv", "w", encoding="utf-8") as f:
+        f.write("timestamp,product_id,status\n")
 
 INPUT_FILE = "./txt_files/products-01.txt"
 OUTPUT_DIR = "./output_data"
 BATCH_SIZE = 1000
-CONCURRENCY_LIMIT = 40
+CONCURRENCY_LIMIT = 1
 MAX_RETRIES = 3
 REQUEST_TIMEOUT = 12
+API_RATE_LIMIT = 150
 
-# Headers giả lập trình duyệt
+# Headers
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -37,37 +89,53 @@ def clean_description(raw_html: Optional[str]) -> str:
     if not raw_html:
         return ""
 
-    # 1. Thay thế các thẻ ngắt dòng bằng ký tự newline thực tế
     text = re.sub(r"<(br|p|div|li)[^>]*>", "\n", raw_html, flags=re.IGNORECASE)
-    # 2. Xoá tất cả thẻ HTML còn lại
     text = HTML_TAG_REGEX.sub(" ", text)
-    # 3. Decode HTML entities (&nbsp; -> khoảng trắng, &#39; -> '...)
     text = html.unescape(text)
-    # 4. Chuẩn hoá khoảng trắng
     lines = [line.strip() for line in text.split("\n")]
     cleaned_text = "\n".join([line for line in lines if line])
     return cleaned_text
 
 
+from typing import Any, Dict, Optional
+import aiohttp
+
+
 async def fetch_product_detail(
-    session: aiohttp.ClientSession, product_id: str, semaphore: asyncio.Semaphore
+    session: aiohttp.ClientSession,
+    product_id: str,
+    semaphore: asyncio.Semaphore,
+    rate_limiter: RateLimiter,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Gọi API Tiki lấy chi tiết sản phẩm bất đồng bộ kèm cơ chế Retry.
-    """
     url = f"https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
+    last_error_reason = "Unknown Error"
 
     async with semaphore:
+        event_logger.info(f"Start fetching ID {product_id}")
+
         for attempt in range(1, MAX_RETRIES + 1):
             try:
+                # Kiểm soát tốc độ và kiểm tra Global Backoff trước khi gửi
+                await rate_limiter.wait()
+
                 async with session.get(
                     url,
                     headers=HEADERS,
                     timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 ) as response:
-                    # Success
+
+                    # 1. Thành công
                     if response.status == 200:
-                        data = await response.json(loads=json.loads)
+                        try:
+                            data = await response.json(
+                                loads=json.loads, content_type=None
+                            )
+                        except Exception as parse_error:
+                            raw_html = await response.text()
+                            event_logger.error(
+                                f"ID {product_id} không phải JSON! Phản hồi từ Tiki: {raw_html}"
+                            )
+                            raise parse_error
 
                         images = []
                         if "images" in data and isinstance(data["images"], list):
@@ -81,6 +149,11 @@ async def fetch_product_detail(
                                     if img_url:
                                         images.append(img_url)
 
+                        event_logger.info(
+                            f"✅ Successfully fetched ID {product_id} on attempt {attempt}"
+                        )
+                        success_logger.info(f"{product_id},SUCCESS")
+
                         return {
                             "id": data.get("id"),
                             "name": data.get("name"),
@@ -90,26 +163,67 @@ async def fetch_product_detail(
                             "images": images,
                         }
 
-                    # Non-exist / Deleted
+                    # 2. Không tồn tại
                     elif response.status in (404, 410):
+                        reason = f"Product not found (HTTP {response.status})"
+                        event_logger.warning(f"Skipping ID {product_id} - {reason}")
+                        error_logger.error(f"{product_id},{reason}")
                         return None
 
-                    # Rate-limit
+                    # 3. Bị Rate-limit -> KÍCH HOẠT GLOBAL BACKOFF
                     elif response.status == 429:
-                        wait_time = attempt * 2
-                        await asyncio.sleep(wait_time)
+                        last_error_reason = "Rate-limited (HTTP 429)"
 
+                        # Kiểm tra header Retry-After từ server
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            backoff_seconds = float(retry_after)
+                        else:
+                            # Exponential backoff: 2s, 4s, 8s,...
+                            backoff_seconds = float(2**attempt)
+
+                        event_logger.warning(
+                            f"⚠️ ID {product_id} dính 429. Kích hoạt Global Backoff"
+                            f" {backoff_seconds}s cho TOÀN BỘ task."
+                        )
+                        await rate_limiter.apply_backoff(backoff_seconds)
+                        continue
+
+                    # 4. Lỗi Server 5xx
                     else:
+                        last_error_reason = f"Server Error (HTTP {response.status})"
+                        event_logger.warning(
+                            f"ID {product_id} failed with HTTP {response.status}. Retrying"
+                            f" ({attempt}/{MAX_RETRIES})"
+                        )
                         await asyncio.sleep(1)
 
-            except (aiohttp.ClientError, asyncio.TimeoutError):
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                error_name = type(e).__name__
+                last_error_reason = f"Network/Timeout Error ({error_name})"
                 if attempt < MAX_RETRIES:
+                    event_logger.warning(
+                        f"ID {product_id} encountered {error_name}. Retrying"
+                        f" ({attempt}/{MAX_RETRIES})"
+                    )
                     await asyncio.sleep(1)
                 else:
-                    return None
-            except Exception:
+                    break
+
+            except Exception as e:
+                reason = f"Unexpected Error: {str(e)}"
+                event_logger.error(
+                    f"ID {product_id} encountered a critical error: {reason}"
+                )
+                error_logger.error(f"{product_id},{reason}")
                 return None
 
+        # Ghi nhận thất bại cuối cùng
+        final_reason = (
+            f"Failed after {MAX_RETRIES} attempts - Final error: {last_error_reason}"
+        )
+        event_logger.error(f"❌ ID {product_id} FAILED: {final_reason}")
+        error_logger.error(f"{product_id},{final_reason}")
         return None
 
 
@@ -119,6 +233,7 @@ async def process_batch(
     batch_index: int,
     semaphore: asyncio.Semaphore,
     progress_bar: tqdm,
+    rate_limiter: RateLimiter,
 ) -> None:
     """
     Thu thập dữ liệu cho 1 batch (1000 sp) và lưu ra file JSON.
@@ -129,7 +244,9 @@ async def process_batch(
         progress_bar.update(len(batch_ids))
         return
 
-    tasks = [fetch_product_detail(session, pid, semaphore) for pid in batch_ids]
+    tasks = [
+        fetch_product_detail(session, pid, semaphore, rate_limiter) for pid in batch_ids
+    ]
 
     results = []
     for coro in asyncio.as_completed(tasks):
@@ -172,9 +289,13 @@ async def main():
 
     pbar = tqdm(total=total_ids, desc="Tiến độ cào dữ liệu", unit="sp")
 
+    RateLimiter_instance = RateLimiter(rate=API_RATE_LIMIT)  # Tạo instance RateLimiter
+
     async with aiohttp.ClientSession(connector=connector) as session:
         for index, batch in enumerate(batches, start=1):
-            await process_batch(session, batch, index, semaphore, pbar)
+            await process_batch(
+                session, batch, index, semaphore, pbar, RateLimiter_instance
+            )
 
     pbar.close()
     print("\n✅ Hoàn tất tải dữ liệu 200k sản phẩm Tiki!")
