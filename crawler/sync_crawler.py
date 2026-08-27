@@ -1,5 +1,4 @@
 import html
-import logging
 import os
 import re
 import time
@@ -8,75 +7,30 @@ import requests
 from tqdm import tqdm
 import ujson as json
 
-# ==========================================
-# CẤU HÌNH LOGGING
-# ==========================================
-
-# 1. Logger tổng hợp sự kiện
-event_logger = logging.getLogger("event_logger")
-event_logger.setLevel(logging.INFO)
-event_handler = logging.FileHandler("events_history.log", encoding="utf-8")
-event_handler.setFormatter(
-    logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+from crawler.config import (
+    BATCH_SIZE,
+    DELAY_BETWEEN_REQUESTS,
+    INPUT_FILE,
+    MAX_RETRIES,
+    OUTPUT_DIR,
+    PROXY,
+    REQUEST_TIMEOUT,
+    SYNC_HEADERS,
 )
-event_logger.addHandler(event_handler)
-
-# 2. Logger ghi nhận ID lỗi ra CSV
-error_logger = logging.getLogger("error_logger")
-error_logger.setLevel(logging.ERROR)
-error_handler = logging.FileHandler("failed_products.csv", encoding="utf-8")
-error_handler.setFormatter(logging.Formatter("%(asctime)s,%(message)s"))
-error_logger.addHandler(error_handler)
-
-if (
-    not os.path.exists("failed_products.csv")
-    or os.path.getsize("failed_products.csv") == 0
-):
-    with open("failed_products.csv", "w", encoding="utf-8") as f:
-        f.write("timestamp,product_id,error_reason\n")
-
-# 3. Logger ghi nhận ID thành công ra CSV
-success_logger = logging.getLogger("success_logger")
-success_logger.setLevel(logging.INFO)
-success_handler = logging.FileHandler("successful_products.csv", encoding="utf-8")
-success_handler.setFormatter(logging.Formatter("%(asctime)s,%(message)s"))
-success_logger.addHandler(success_handler)
-
-if (
-    not os.path.exists("successful_products.csv")
-    or os.path.getsize("successful_products.csv") == 0
-):
-    with open("successful_products.csv", "w", encoding="utf-8") as f:
-        f.write("timestamp,product_id,status\n")
-
-# ==========================================
-# CẤU HÌNH THÔNG SỐ CRAWLER
-# ==========================================
-INPUT_FILE = "./txt_files/products-01.txt"
-OUTPUT_DIR = "./output_data"
-BATCH_SIZE = 1000
-MAX_RETRIES = 3
-REQUEST_TIMEOUT = 12
-DELAY_BETWEEN_REQUESTS = 1
-PROXY = os.getenv("TIKI_PROXY") or None
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-        " like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://tiki.vn/",
-    "sec-ch-ua": ('"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'),
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
-    "sec-fetch-site": "same-site",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-dest": "empty",
-}
+from crawler.logger import error_logger, event_logger, success_logger
 
 HTML_TAG_REGEX = re.compile(r"<[^>]+>")
+
+
+def print_error_response(product_id: str, response: requests.Response) -> None:
+    """In toàn bộ body response để kiểm tra lỗi HTML/WAF."""
+    print(
+        f"\n===== ERROR RESPONSE ID {product_id} "
+        f"(HTTP {response.status_code}) =====\n"
+        f"{response.text}\n"
+        "===== END ERROR RESPONSE =====\n",
+        flush=True,
+    )
 
 
 def clean_description(raw_html: Optional[str]) -> str:
@@ -108,7 +62,7 @@ def fetch_product_detail(
 
             response = session.get(
                 url,
-                headers=HEADERS,
+                headers=SYNC_HEADERS,
                 timeout=REQUEST_TIMEOUT,
                 proxies=proxies,
             )
@@ -119,6 +73,7 @@ def fetch_product_detail(
                     data = response.json()
                 except Exception as parse_error:
                     raw_html = response.text
+                    print_error_response(product_id, response)
                     is_html = "<html" in raw_html[:1000].lower()
                     last_error_reason = (
                         "Blocked HTML response" if is_html else "Invalid JSON response"
@@ -185,6 +140,7 @@ def fetch_product_detail(
             # 4. Lỗi Server 5xx hoặc các mã HTTP khác
             else:
                 last_error_reason = f"Server Error (HTTP {response.status_code})"
+                print_error_response(product_id, response)
                 event_logger.warning(
                     f"ID {product_id} failed with HTTP {response.status_code}. Retrying"
                     f" ({attempt}/{MAX_RETRIES})"

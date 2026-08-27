@@ -1,4 +1,0 @@
-- Lần chạy đầu tiên:
-    + Tốc độ hiển thị trong log là giao động khoảng từ 12-30 sp/s (maybe đoán là 20 sp/s) -> Cần hiển thị thêm thời gian đã chạy trung bình cửa sổ
-    + Cào 1000 record json trong 1 file, nhưng thực tế số json trong 1 file rất thấp, nhiều file hoàn toàn rỗng
-    + Cần thêm log để track lí do, và checkpoint để restart, chứ tình hình này ngay cả khi crawl được full thì cũng mất khoảng 2h45p để crawl xong
