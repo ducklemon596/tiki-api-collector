@@ -81,17 +81,13 @@ def main():
                 new_success_count += 1
                 pending_save_ids.append(str(pid))
 
-            # Lưu JSON mỗi 10 request thành công
-            if new_success_count > 0 and new_success_count % SAVE_INTERVAL == 0:
-                save_batch_json(batch_results, batch_num)
-
-                msg_saved = f"{', '.join(pending_save_ids)}"
-                write_disk_logger.info(msg_saved)
-                pending_save_ids.clear()
-
-                event_logger.info(
-                    f"Đã lưu JSON (Batch {batch_num:04d}) với {len(batch_results)} SP."
-                )
+                if new_success_count % SAVE_INTERVAL == 0:
+                    save_batch_json(batch_results, batch_num)
+                    write_disk_logger.info(f"{', '.join(pending_save_ids)}")
+                    pending_save_ids.clear()
+                    event_logger.info(
+                        f"Đã lưu JSON (Batch {batch_num:04d}) với {len(batch_results)} SP."
+                    )
 
             time.sleep(
                 random.uniform(DELAY * 0.7, DELAY * 1.3)
