@@ -46,24 +46,52 @@ def load_and_batch_ids(
 
 
 def get_resume_state(
-    output_dir: Path, not_found_file: Path, batches: list[list[int]]
+    output_dir: Path,
+    not_found_file: Path,
+    batches: list[list[int]],
+    start_batch: int = 1,
+    end_batch: Optional[int] = None,
 ) -> tuple[int, list[dict], list[int]]:
-    """Xác định batch cần chạy tiếp và danh sách ID còn thiếu bằng cách đọc file batch gần nhất.
+    """Xác định batch cần chạy tiếp và danh sách ID còn thiếu (trong trường hợp resume) bằng cách đọc file batch gần nhất.
     Args:
         output_dir (Path): Thư mục chứa các file batch.
         not_found_file (Path): Đường dẫn tới file chứa các ID 404.
         batches (list[list[int]]): Danh sách các batch.
+        start_batch (int): Batch bắt đầu (1-based index).
+        end_batch (Optional[int]): Batch kết thúc (1-based index). Nếu None, sẽ chạy đến batch cuối cùng.
     Returns:
-        tuple: (batch_idx, existing_data, pending_ids)"""
+        batch_idx (int): Chỉ số batch cần chạy tiếp (0-based index).
+        existing_data (list[dict]): Danh sách dữ liệu đã fetch thành công từ file batch gần nhất.
+        pending_ids (list[int]): Danh sách ID còn thiếu cần fetch tiếp."""
 
-    batch_files = sorted(output_dir.glob("tiki_batch_*.json"))
+    if end_batch is None:
+        end_batch = len(batches)
+
+    # Chỉ lấy các file json nằm trong phạm vi [start_batch, end_batch]
+    valid_files = []
+    for f in output_dir.glob("tiki_batch_*.json"):
+        try:
+            b_num = int(f.stem.split("_")[-1])
+            if start_batch <= b_num <= end_batch:
+                valid_files.append(f)
+        except ValueError:
+            continue
+
+    batch_files = sorted(valid_files)
+
+    # Nếu không có file batch nào, bắt đầu từ batch đầu tiên
     if not batch_files:
-        return 0, [], batches[0]  # Chạy từ đầu, pending_ids là nguyên Batch 1
+        start_idx = start_batch - 1
+        if start_idx >= len(batches):
+            return len(batches), [], []
+        return start_idx, [], batches[start_idx]
 
+    # Lấy file batch mới nhất
     latest_file = batch_files[-1]
     latest_batch_num = int(latest_file.stem.split("_")[-1])
     batch_idx = latest_batch_num - 1
 
+    # Quét qua file batch mới nhất để xác định các ID đã fetch thành công (không tốn thời gian nhiều so với request delay)
     fetched_ids = set()
     existing_data = []
     try:
@@ -86,17 +114,15 @@ def get_resume_state(
                         fetched_ids.add(int(pid_str))
 
     expected_ids = batches[batch_idx]
+    # Lấy danh sách ID còn thiếu (chưa fetch thành công và chưa bị 404)
     pending_ids = [pid for pid in expected_ids if pid not in fetched_ids]
 
     if not pending_ids:
-        # Batch này đã xong, chuyển batch tiếp theo
-        # pending_ids của batch tiếp theo chính là toàn bộ ID của batch đó
         next_idx = batch_idx + 1
-        if next_idx < len(batches):
+        if next_idx < len(batches) and next_idx < end_batch:
             return next_idx, [], batches[next_idx]
         return next_idx, [], []
     else:
-        # Batch này đang dở dang
         return batch_idx, existing_data, pending_ids
 
 

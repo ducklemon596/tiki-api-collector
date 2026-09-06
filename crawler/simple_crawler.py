@@ -1,3 +1,4 @@
+import argparse
 import time
 import random
 from config import (
@@ -27,21 +28,33 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--start-batch", type=int, default=1, help="Batch bắt đầu")
+    parser.add_argument("--end-batch", type=int, default=None, help="Batch kết thúc")
+    args = parser.parse_args()
+
     batches, total_ids = load_and_batch_ids(INPUT_FILE, BATCH_SIZE)
     if not batches:
-        print(
-            f"⚠️ LỖI: Không tìm thấy file hoặc file trống tại đường dẫn: {INPUT_FILE}"
-        )
+        print(f"LỖI: Không tìm thấy file hoặc file trống tại đường dẫn: {INPUT_FILE}")
         return
 
     start_batch_idx, fetched_data, initial_pending = get_resume_state(
-        OUTPUT_DIR, NOT_FOUND_FILE, batches
+        OUTPUT_DIR, NOT_FOUND_FILE, batches, args.start_batch, args.end_batch
     )
 
     print(f"Tổng số ID cần xử lý: {total_ids:,}")
+    print(
+        f"Máy này cào từ Batch: {args.start_batch} đến {args.end_batch or len(batches)}"
+    )
     print(f"Bắt đầu chạy từ Batch thứ: {start_batch_idx + 1}")
 
-    for batch_idx in range(start_batch_idx, len(batches)):
+    # 1-based index cho end_batch
+    end_batch_idx = (
+        min(args.end_batch, len(batches)) if args.end_batch else len(batches)
+    )
+
+    # 0-based index cho start_batch
+    for batch_idx in range(start_batch_idx, end_batch_idx):
         batch_num = batch_idx + 1
 
         if batch_idx == start_batch_idx:
@@ -49,7 +62,7 @@ def main():
             batch_results = fetched_data
             pending_ids = initial_pending
         else:
-            # Từ batch sau trở đi -> Mảng trắng tinh, bốc thẳng 1000 ID mới ra cào
+            # Từ batch sau trở đi thì gọi từ đầu
             batch_results = []
             pending_ids = batches[batch_idx]
 
