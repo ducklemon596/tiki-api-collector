@@ -188,7 +188,7 @@ def fetch_product_data(
         Optional[dict]: Dữ liệu sản phẩm nếu fetch thành công, None nếu không tìm thấy hoặc lỗi.
     """
 
-    url = f"https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
+    url = f"https://tiki-crawler-01.thienquang050906.workers.dev/?url=https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
     msg_start = f"Batch {batch_num:04d} | Fetching ID {product_id}..."
     print(msg_start, end=" ")
     event_logger.info(msg_start)
