@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-.docx
-.txt
+# Data files
+data/output/
+data/logs/
+*.json
+*.log
