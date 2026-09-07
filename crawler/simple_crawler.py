@@ -31,6 +31,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-batch", type=int, default=1, help="Batch bắt đầu")
     parser.add_argument("--end-batch", type=int, default=None, help="Batch kết thúc")
+    parser.add_argument(
+        "--cloudflare-worker-url",
+        type=str,
+        default="tiki-crawler-01.thienquang050906.workers.dev",
+        help="URL của Cloudflare Worker để fetch dữ liệu",
+    )
     args = parser.parse_args()
 
     batches, total_ids = load_and_batch_ids(INPUT_FILE, BATCH_SIZE)
@@ -78,6 +84,7 @@ def main():
         # 4. Fetch từng ID
         for pid in pending_ids:
             product_data = fetch_product_data(
+                cloudflare_worker_url=args.cloudflare_worker_url,
                 product_id=pid,
                 batch_num=batch_num,
                 event_logger=event_logger,
@@ -102,9 +109,7 @@ def main():
                         f"Đã lưu JSON (Batch {batch_num:04d}) với {len(batch_results)} SP."
                     )
 
-            time.sleep(
-                random.uniform(DELAY * 0.7, DELAY * 1.3)
-            )  # Thêm random delay để tránh bị WAF
+            time.sleep(random.uniform(0.3, 0.6))  # Thêm random delay để tránh bị WAF
 
         # Lưu lần cuối khi hoàn thành toàn bộ batch
         if new_success_count > 0:

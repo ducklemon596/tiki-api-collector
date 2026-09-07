@@ -162,6 +162,7 @@ def extract_product_info(raw_data: dict) -> dict:
 
 
 def fetch_product_data(
+    cloudflare_worker_url: str,
     product_id: int,
     batch_num: int,
     event_logger: logging.Logger,
@@ -174,6 +175,7 @@ def fetch_product_data(
 ) -> Optional[dict]:
     """Fetch dữ liệu sản phẩm từ API Tiki dựa trên product_id.
     Args:
+        cloudflare_worker_url (str): URL của Cloudflare Worker để bypass WAF.
         product_id (int): ID của sản phẩm cần fetch.
         batch_num (int): Số thứ tự của batch.
         event_logger: Logger để ghi lại các sự kiện.
@@ -188,7 +190,7 @@ def fetch_product_data(
         Optional[dict]: Dữ liệu sản phẩm nếu fetch thành công, None nếu không tìm thấy hoặc lỗi.
     """
 
-    url = f"https://tiki-crawler-01.thienquang050906.workers.dev/?url=https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
+    url = f"https://{cloudflare_worker_url}/?url=https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
     msg_start = f"Batch {batch_num:04d} | Fetching ID {product_id}..."
     print(msg_start, end=" ")
     event_logger.info(msg_start)
