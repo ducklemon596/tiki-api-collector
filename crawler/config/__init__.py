@@ -17,7 +17,7 @@ REQUEST_TIMEOUT = 10  # Thời gian chờ tối đa cho mỗi request (giây)
 WAF_RETRY_DELAY = 600  # Phạt 10 phút (600s) nếu dính WAF/HTML
 MAX_WAF_RETRIES = 3  # Số lần thử lại tối đa cho 1 ID
 BATCH_SIZE = 1000  # Số lượng ID mỗi batch
-SAVE_INTERVAL = 10  # Lưu file sau mỗi 10 request thành công
+SAVE_INTERVAL = 50  # Flush and fsync append-only checkpoints every 50 terminal records
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",

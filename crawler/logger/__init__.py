@@ -1,12 +1,4 @@
 import logging
-from config import (
-    EVENT_LOG_FILE,
-    NOT_FOUND_FILE,
-    WRITE_DISK_FILE,
-    LOG_DIR,
-)
-
-LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def setup_logger(name, log_file, level=logging.INFO):
@@ -26,8 +18,3 @@ def setup_logger(name, log_file, level=logging.INFO):
         # Thêm handler vào logger
         logger.addHandler(handler)
     return logger
-
-
-event_logger = setup_logger("event_logger", EVENT_LOG_FILE)
-not_found_logger = setup_logger("not_found_logger", NOT_FOUND_FILE)
-write_disk_logger = setup_logger("write_disk_logger", WRITE_DISK_FILE)

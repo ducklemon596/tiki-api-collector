@@ -1,129 +1,132 @@
 import argparse
-import time
 import random
+import time
+from pathlib import Path
+
+import requests
+
 from config import (
-    INPUT_FILE,
-    INPUT_DIR,
-    OUTPUT_DIR,
-    NOT_FOUND_FILE,
-    HEADERS,
-    DELAY,
-    REQUEST_TIMEOUT,
-    MAX_WAF_RETRIES,
-    WAF_RETRY_DELAY,
-    SAVE_INTERVAL,
     BATCH_SIZE,
+    DATA_DIR,
+    DELAY,
+    HEADERS,
+    INPUT_DIR,
+    INPUT_FILE,
+    MAX_WAF_RETRIES,
+    REQUEST_TIMEOUT,
+    SAVE_INTERVAL,
+    WAF_RETRY_DELAY,
 )
-
-from utils import (
-    get_resume_state,
-    load_and_batch_ids,
-    save_batch_json,
-    fetch_product_data,
-)
-from logger import event_logger, not_found_logger, write_disk_logger
-
-INPUT_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+from logger import setup_logger
+from utils import BatchCheckpoint, fetch_product_data, load_and_batch_ids
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start-batch", type=int, default=1, help="Batch bắt đầu")
-    parser.add_argument("--end-batch", type=int, default=None, help="Batch kết thúc")
+    parser.add_argument("--start-batch", type=int, default=1)
+    parser.add_argument("--end-batch", type=int, default=None)
+    parser.add_argument("--worker-id", default="worker-01")
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Isolated directory for this worker's checkpoints, final output, and logs.",
+    )
     parser.add_argument(
         "--cloudflare-worker-url",
-        type=str,
         default="tiki-crawler-01.thienquang050906.workers.dev",
-        help="URL của Cloudflare Worker để fetch dữ liệu",
     )
+    parser.add_argument("--delay-min", type=float, default=1.5)
+    parser.add_argument("--delay-max", type=float, default=2.5)
     args = parser.parse_args()
+    if args.delay_min < 0 or args.delay_max < args.delay_min:
+        parser.error("Require 0 <= --delay-min <= --delay-max")
+
+    run_dir = args.run_dir or DATA_DIR / "runs" / args.worker_id
+    log_dir = run_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    event_logger = setup_logger(
+        f"event_logger_{args.worker_id}", log_dir / "events.log"
+    )
+    not_found_logger = setup_logger(
+        f"not_found_logger_{args.worker_id}", log_dir / "not_found.log"
+    )
 
     batches, total_ids = load_and_batch_ids(INPUT_FILE, BATCH_SIZE)
     if not batches:
-        print(f"LỖI: Không tìm thấy file hoặc file trống tại đường dẫn: {INPUT_FILE}")
+        print(f"No valid IDs found at: {INPUT_FILE}")
         return
 
-    start_batch_idx, fetched_data, initial_pending = get_resume_state(
-        OUTPUT_DIR, NOT_FOUND_FILE, batches, args.start_batch, args.end_batch
-    )
+    end_batch = min(args.end_batch or len(batches), len(batches))
+    start_batch = max(args.start_batch, 1)
+    print(f"Total IDs: {total_ids:,}; batches: {start_batch}-{end_batch}")
 
-    print(f"Tổng số ID cần xử lý: {total_ids:,}")
-    print(
-        f"Máy này cào từ Batch: {args.start_batch} đến {args.end_batch or len(batches)}"
-    )
-    print(f"Bắt đầu chạy từ Batch thứ: {start_batch_idx + 1}")
-
-    # 1-based index cho end_batch
-    end_batch_idx = (
-        min(args.end_batch, len(batches)) if args.end_batch else len(batches)
-    )
-
-    # 0-based index cho start_batch
-    for batch_idx in range(start_batch_idx, end_batch_idx):
-        batch_num = batch_idx + 1
-
-        if batch_idx == start_batch_idx:
-            # Nếu là batch đầu tiên lúc bật máy -> Dùng data cũ và danh sách ID đã lọc
-            batch_results = fetched_data
-            pending_ids = initial_pending
-        else:
-            # Từ batch sau trở đi thì gọi từ đầu
-            batch_results = []
-            pending_ids = batches[batch_idx]
-
-        if not pending_ids:
-            continue
-
-        event_logger.info(
-            f"--- BẮT ĐẦU BATCH {batch_num:04d} ({len(pending_ids)} ID cần fetch tiếp) ---"
-        )
-        new_success_count = 0
-        pending_save_ids = []
-
-        # 4. Fetch từng ID
-        for pid in pending_ids:
-            product_data = fetch_product_data(
-                cloudflare_worker_url=args.cloudflare_worker_url,
-                product_id=pid,
-                batch_num=batch_num,
-                event_logger=event_logger,
-                not_found_logger=not_found_logger,
-                waf_retry_delay=WAF_RETRY_DELAY,
-                max_waf_retries=MAX_WAF_RETRIES,
-                headers=HEADERS,
-                request_timeout=REQUEST_TIMEOUT,
-                delay=DELAY,
+    with requests.Session() as session:
+        for batch_num in range(start_batch, end_batch + 1):
+            assigned_ids = batches[batch_num - 1]
+            checkpoint = BatchCheckpoint(
+                run_dir, batch_num, sync_interval=SAVE_INTERVAL
             )
+            if checkpoint.finalized:
+                event_logger.info("Batch %04d already finalized; skipping", batch_num)
+                continue
 
-            if product_data:
-                batch_results.append(product_data)
-                new_success_count += 1
-                pending_save_ids.append(str(pid))
-
-                if new_success_count % SAVE_INTERVAL == 0:
-                    save_batch_json(batch_results, batch_num)
-                    write_disk_logger.info(f"{', '.join(pending_save_ids)}")
-                    pending_save_ids.clear()
-                    event_logger.info(
-                        f"Đã lưu JSON (Batch {batch_num:04d}) với {len(batch_results)} SP."
-                    )
-
-            time.sleep(random.uniform(0.3, 0.6))  # Thêm random delay để tránh bị WAF
-
-        # Lưu lần cuối khi hoàn thành toàn bộ batch
-        if new_success_count > 0:
-            save_batch_json(batch_results, batch_num)
-
-            msg_saved = f"{', '.join(pending_save_ids)}"
-            write_disk_logger.info(msg_saved)
-
+            existing_products, completed_ids = checkpoint.load_completed()
+            pending_ids = [
+                product_id
+                for product_id in assigned_ids
+                if product_id not in completed_ids
+            ]
+            success_count = len(existing_products)
+            not_found_count = len(completed_ids) - success_count
             event_logger.info(
-                f"--- HOÀN THÀNH BATCH {batch_num:04d} (Tổng thực tế: {len(batch_results)} SP) ---"
+                "Starting batch %04d: %d pending, %d completed",
+                batch_num,
+                len(pending_ids),
+                len(completed_ids),
             )
 
-    print("\n🎉 HOÀN TẤT TOÀN BỘ QUÁ TRÌNH CÀO DỮ LIỆU!")
-    event_logger.info("HOÀN TẤT TOÀN BỘ QUÁ TRÌNH CÀO DỮ LIỆU!")
+            checkpoint.open()
+            try:
+                for product_id in pending_ids:
+                    product, not_found_status = fetch_product_data(
+                        session=session,
+                        cloudflare_worker_url=args.cloudflare_worker_url,
+                        product_id=product_id,
+                        batch_num=batch_num,
+                        event_logger=event_logger,
+                        not_found_logger=not_found_logger,
+                        waf_retry_delay=WAF_RETRY_DELAY,
+                        max_waf_retries=MAX_WAF_RETRIES,
+                        headers=HEADERS,
+                        request_timeout=REQUEST_TIMEOUT,
+                        delay=DELAY,
+                    )
+                    if product is not None:
+                        success_count += 1
+                        synced = checkpoint.record_success(product)
+                    elif not_found_status is not None:
+                        not_found_count += 1
+                        synced = checkpoint.record_not_found(
+                            product_id, not_found_status
+                        )
+                    else:
+                        # Retryable errors are deliberately not terminal checkpoint records.
+                        synced = False
+                    if synced:
+                        checkpoint.write_state(
+                            args.worker_id, success_count, not_found_count
+                        )
+                    time.sleep(random.uniform(args.delay_min, args.delay_max))
+
+                checkpoint.write_state(args.worker_id, success_count, not_found_count)
+                final_path = checkpoint.finalize()
+                event_logger.info("Finalized batch %04d at %s", batch_num, final_path)
+            finally:
+                checkpoint.close()
+
+    print("Crawl complete.")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,7 @@
-from .utils import (
-    get_resume_state,
-    load_and_batch_ids,
-    save_batch_json,
-    fetch_product_data,
-)
+from .utils import BatchCheckpoint, fetch_product_data, load_and_batch_ids
 
 __all__ = [
-    "get_resume_state",
+    "BatchCheckpoint",
     "load_and_batch_ids",
-    "save_batch_json",
     "fetch_product_data",
 ]
