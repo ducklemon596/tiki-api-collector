@@ -59,7 +59,6 @@ class SeleniumTikiClient:
         self._start_intervals: list[float] = []
         self._total_id_times: list[float] = []
         self.counts = {"success": 0, "not_found": 0, "waf": 0, "error": 0}
-        self.stop_requested = False
 
     def open_tiki(self) -> None:
         """Establish an ordinary Tiki browsing context once at crawler startup."""
@@ -179,9 +178,6 @@ def fetch_product_data(
 
     total_id_elapsed = time.perf_counter() - total_started
     metrics = client.record_result(result, response, total_id_elapsed)
-    if result == "waf":
-        client.stop_requested = True
-
     log_method = event_logger.info if result in {"success", "not-found"} else event_logger.warning
     log_method(
         "product_id=%s request_number=%s started_at=%s start_interval=%s fetch_latency=%.3fs total_id_elapsed=%.3fs status=%s content_type=%r result=%s counts=%s%s",
