@@ -23,11 +23,22 @@ def load_and_batch_ids(file_path: Path, batch_size: int = 1000) -> tuple[list[li
     return [unique_ids[i : i + batch_size] for i in range(0, len(unique_ids), batch_size)], len(unique_ids)
 
 
+def clean_description(text: Optional[str]) -> Optional[str]:
+    """Normalize description whitespace without removing paragraph boundaries."""
+    if not text:
+        return text
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"[ \t]*\n[ \t]*", "\n", text)
+    text = re.sub(r"\n{2,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
 def clean_html(raw_html: Optional[str]) -> str:
     if not raw_html:
         return ""
     text = re.sub(r"<(br|p|div|li)[^>]*>", "\n", raw_html, flags=re.IGNORECASE)
-    return html.unescape(HTML_TAG_REGEX.sub(" ", text)).strip()
+    return clean_description(html.unescape(HTML_TAG_REGEX.sub(" ", text))) or ""
 
 
 def extract_product_info(raw_data: dict) -> dict:
