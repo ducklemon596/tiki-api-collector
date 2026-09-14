@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "crawler"))
 
-from utils.utils import clean_description
+from utils.product import clean_description
 
 
 class CleanDescriptionTests(unittest.TestCase):

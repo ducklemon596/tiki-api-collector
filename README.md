@@ -1,203 +1,239 @@
+# Selenium Product Crawler
 
-# Tiki Product Crawler
+A resumable product crawler that fetches Tiki product data API responses from inside real Chrome sessions.
+It is designed to collect as much correct data as possible, keep a clear record
+of every run, and improve throughput gradually through measurement.
 
-Công cụ đọc danh sách mã sản phẩm từ file Excel, gọi Tiki Product Detail API
-và lưu dữ liệu sản phẩm thành các file JSON.
+The maintained configuration uses two persistent Chrome browsers with four
+bounded browser-side `fetch()` requests in each browser.
 
-API được sử dụng:
+## What It Provides
+
+- Real Selenium/Chrome transport instead of a separate Python HTTP client.
+- Bounded browser-side concurrency: no unlimited `Promise.all()` request burst.
+- Deterministic ID partitions across two browser workers.
+- Clear per-product, not-found, event, and aggregate logs.
+- Durable checkpoints, terminal metrics, active elapsed time, and final run
+  summaries.
+- Idempotent resume: completed IDs are not fetched again.
+- A standalone rerun command for structured not-found/error IDs.
+
+## How It Works
 
 ```text
-https://api.tiki.vn/product-detail/api/v1/products/{product_id}
+Product ID text file
+        |
+        v
+Input batching + deterministic contiguous partitioning
+        |
+        +------------------------+
+        |                        |
+        v                        v
+ Chrome worker 1            Chrome worker 2
+ bounded JS fetch pool      bounded JS fetch pool
+        |                        |
+        +-----------+------------+
+                    v
+       classify: success / not-found / WAF / error
+                    |
+        +-----------+------------+
+        |                        |
+        v                        v
+ Append-only checkpoint   Terminal metrics journal
+ isolated per browser     isolated per browser
+        |                        |
+        +-----------+------------+
+                    v
+     durable aggregation, summary, and monitor milestones
 ```
 
-Dữ liệu đầu ra gồm: `id`, `name`, `url_key`, `price`, `description` và `images`.
+Python starts two Chrome workers. Each browser receives its own contiguous ID
+range, its own JavaScript worker pool, and its own checkpoint/log/metric tree.
+This keeps persistence simple: two browsers never write the same checkpoint.
 
-## 1. Mục đích và luồng xử lý
+## Quick Start
 
-1. Đặt file Excel (`.xlsx`) vào `data/input/`.
-2. Đọc cột đầu tiên của Excel, loại bỏ giá trị rỗng và tạo file `.txt` chứa
-	 một product ID trên mỗi dòng.
-3. Crawler đọc file `.txt`, loại bỏ ID trùng lặp và chia danh sách thành batch.
-4. Mỗi batch được lưu thành một file JSON trong `data/output/`.
-5. File JSON đã tồn tại được bỏ qua để có thể tiếp tục sau khi bị gián đoạn.
+Requirements:
 
-## 2. Vấn đề gặp phải
+- Python 3.13+
+- Google Chrome
+- `uv` recommended
 
-Sau một vài request đầu, API có thể vẫn trả HTTP `200` nhưng body là HTML chứa
-BytePlus WAF Challenge thay vì JSON. Vì vậy chương trình gặp
-`JSONDecodeError` hoặc `Blocked HTML Response`; các lần retry sau đó thường
-tiếp tục nhận HTML.
+Install dependencies:
 
-Mở cùng URL bằng Chrome vẫn có thể nhận JSON vì Chrome thực thi JavaScript
-challenge và có client identity giống trình duyệt hơn. Các thử nghiệm giảm
-concurrency từ `40` xuống `1`, rate từ `150 req/s` xuống `1 req/s`, chạy
-tuần tự bằng `requests`, hoặc retry với backoff đều không loại bỏ hoàn toàn
-việc bị chặn.
-
-Nguyên nhân có khả năng chính là anti-bot ở tầng nhận diện client:
-
-- TLS fingerprint (JA3/JA4) của Python khác Chrome.
-- HTTP client thuần không có JavaScript engine để giải challenge và tạo cookie.
-- Cách thương lượng giao thức và HTTP/2 cũng có thể khác trình duyệt thật.
-
-## 3. Cơ chế mode `sync`
-
-Mode `sync` dùng `requests.Session` và xử lý tuần tự từng product ID:
-
-- Tái sử dụng TCP connection pool qua một `Session`.
-- Chờ `--delay` giây trước mỗi request để giảm tốc độ gọi API.
-- Giới hạn thời gian bằng `--timeout`.
-- Retry lỗi mạng, timeout, lỗi server, HTML hoặc JSON không hợp lệ.
-- Dùng exponential backoff khi không parse được JSON.
-- Với HTTP `429`, đọc `Retry-After`; nếu thiếu thì dùng thời gian chờ dự phòng.
-- HTTP `404` và `410` được ghi log và bỏ qua, không retry.
-
-Mode này dễ theo dõi và ít tạo burst request, nhưng tốc độ thấp vì mỗi lúc chỉ
-xử lý một request.
-
-## 4. Cơ chế mode `async`
-
-Mode `async` dùng `curl-cffi.AsyncSession` với `impersonate="chrome124"`:
-
-- Tạo nhiều task bất đồng bộ trong mỗi batch.
-- `asyncio.Semaphore` giới hạn request đồng thời bằng `--concurrency`.
-- `RateLimiter` giới hạn tốc độ toàn cục bằng `--rate-limit`.
-- Retry lỗi mạng, curl error, lỗi server, HTTP `429`, HTML và JSON không hợp lệ.
-- Global backoff: khi một task gặp `429` hoặc WAF challenge, toàn bộ task phải
-	chờ trước khi gửi request tiếp theo.
-- Jitter ngẫu nhiên `0.05` đến `0.25` giây giúp các task không gửi đồng thời.
-- `curl-cffi` mô phỏng một số đặc điểm Chrome, nhưng không thay thế trình
-	duyệt có JavaScript engine.
-
-## 5. Cơ chế cài đặt `RateLimiter`
-
-`RateLimiter` nằm trong `rate_limiter/rate_limit.py` và là module nội bộ,
-không cần cài riêng. Dependency `curl-cffi` được khai báo trong
-`pyproject.toml`.
-
-Async crawler khởi tạo:
-
-```python
-rate_limiter = RateLimiter(rate=10)
-```
-
-Với `rate=10`, khoảng cách cơ sở là $1 / 10 = 0.1$ giây giữa hai request.
-Trước mỗi request, crawler gọi `await rate_limiter.wait()`. Hàm này dùng
-`asyncio.Lock` và `asyncio.Condition` để:
-
-1. Đồng bộ lịch request giữa các task.
-2. Chờ đủ khoảng cách rate limit hoặc global backoff.
-3. Thêm jitter ngẫu nhiên từ `0.05` đến `0.25` giây.
-
-Khi gặp `429` hoặc WAF challenge, crawler gọi
-`await rate_limiter.apply_backoff(seconds)`. Thời điểm `blocked_until` được
-dùng chung; chỉ backoff mới dài hơn mới thay thế thời điểm hiện tại và các
-task đang chờ sẽ tính toán lại thời gian.
-
-## 6. Cài đặt môi trường
-
-Yêu cầu Python `>= 3.13`. Khuyến nghị dùng `uv`:
-
-```powershell
+```bash
 uv sync
 ```
 
-Hoặc dùng pip:
+Put one numeric product ID per line in:
 
-```powershell
-pip install -e .
+```text
+data/input/products-01.txt
 ```
 
-## 7. Cách chạy chi tiết
+Run the default full crawl:
 
-### Bước 1: Chuyển Excel thành danh sách ID
-
-Đặt file `.xlsx` vào `data/input/`. Product ID phải nằm ở cột đầu tiên (hiện tại folder đã chứa sẵn file .txt nên không cần chạy bước này):
-
-```powershell
-uv run python converter/convert_id.py
+```bash
+uv run python crawler/main.py crawl
 ```
 
-Mỗi file Excel tạo một file `.txt` tương ứng trong `data/input/`.
+| Default setting | Value |
+| --- | --- |
+| Browser workers | 2 persistent Chrome sessions |
+| Browser-side concurrency | 4 fetches per Chrome |
+| Input range | batches 1-200 (up to 200,000 IDs) |
+| Selenium call size | 50 IDs |
+| Output directory | `data/runs/default-crawl` |
 
-### Bước 2: Chạy mode `sync`
+Use a different output directory for a separate experiment:
 
-```powershell
-uv run python main.py --mode sync --input data/input/products-01.txt
+```bash
+uv run python crawler/main.py crawl --run-dir data/runs/my-full-run
 ```
 
-Ví dụ cấu hình:
+For a smaller test, override the batch range:
 
-```powershell
-uv run python main.py --mode sync `
-	--input data/input/products-01.txt `
-	--output data/output `
-	--batch-size 500 `
-	--delay 2 `
-	--timeout 20 `
-	--retries 5
+```bash
+uv run python crawler/main.py crawl --start-batch 1 --end-batch 10 --run-dir data/runs/my-10k-run
 ```
 
-### Bước 3: Chạy mode `async`
+## Resume, Idempotency, and Logging
 
-```powershell
-uv run python main.py --mode async --input data/input/products-01.txt
+Run the exact same command again to resume. The manifest verifies that the
+batch range, browser count, browser concurrency, and Selenium call size still
+match. A finalized batch is immutable, so its IDs are skipped on every later
+attempt. Partially completed batches reload their terminal IDs and fetch only
+the remaining ones.
+
+The run directory is the durable source of truth after a crash:
+
+- Success and not-found records are append-only JSONL checkpoints.
+- Final batch JSON is created only after every ID in that batch is terminal.
+- `progress.json` stores cumulative active processing time; idle time between
+  attempts is excluded from effective IDs/hour.
+- Each browser writes readable event and not-found logs plus terminal metric
+  records. The aggregate log and summary provide run-level metrics.
+- On a WAF/challenge response, workers stop. Only terminal responses ending at
+  or before the shared cutoff timestamp are persisted.
+
+## Monitor a Run
+
+Run this in another terminal while the crawler is active:
+
+```bash
+uv run python crawler/main.py monitor --run-dir data/runs/default-crawl
 ```
 
-Ví dụ cấu hình:
+It records periodic throughput milestones. Use `benchmark_summary.json` for the
+final success/not-found counts, latency metrics, elapsed time, and IDs/hour.
 
-```powershell
-uv run python main.py --mode async `
-	--input data/input/products-01.txt `
-	--output data/output `
-	--batch-size 500 `
-	--concurrency 5 `
-	--rate-limit 10 `
-	--timeout 20 `
-	--retries 5
+## Rerun Not-Found and Error IDs
+
+Create a new run from the structured results of an earlier run:
+
+```bash
+uv run python crawler/rerun.py --source-run data/runs/my-full-run --run-dir data/runs/my-full-run-rerun
 ```
 
-### Bước 4: Xem tất cả tùy chọn
+The source run is never changed. The new run stores its selected IDs in
+`rerun_metadata.json` and `rerun_ids.txt`, then uses the normal crawl command,
+checkpoints, and resume behavior. `rerun_summary.json` reports recovered
+successes, remaining not-found IDs, unresolved/error IDs, WAF state, and the
+browser-error count.
 
-```powershell
-uv run python main.py --help
+Not-found IDs are always available from structured checkpoint JSONL files.
+Error IDs are included only when the source run already has structured
+`metrics/errors.jsonl`; older runs do not contain recoverable per-ID errors and
+the tool intentionally does not parse human-readable logs.
+
+## Benchmark Results
+
+The benchmark work improved rate step by step while watching latency, memory,
+classification correctness, and WAF/error signals.
+
+| Configuration | IDs/hour | Speedup | WAF / browser errors |
+| --- | ---: | ---: | --- |
+| 1 Chrome x C1 | 28,061 | starting point | 0 / 0 |
+| 1 Chrome x C4 | 70,297 | 2.51x vs C1 on the same 500-ID test | 0 / 0 |
+| 1 Chrome x C4 | 113,234 | stable 10,000-ID baseline | 0 / 0 |
+| 1 Chrome x C8 | 152,620 | 1.35x vs 1 Chrome x C4 | 0 / 0 |
+| 2 Chrome x C4 | 192,140 | 1.25x vs 1 Chrome x C8; 6.61x vs earliest C1 trial | 0 / 0 |
+
+Two Chrome x C4 is the default. It delivered the best practical balance:
+compared with it, two Chrome x C8 gained only 0.02% throughput while sharply
+raising tail latency, and four Chrome x C4 gained only 0.9% while roughly
+doubling Chrome memory use. Full methodology and measurements are in
+[data/runs/BENCHMARK_RESULTS.md](data/runs/BENCHMARK_RESULTS.md).
+
+## Project Layout
+
+```text
+.
+|-- crawler/
+|   |-- main.py                 # crawl and monitor commands
+|   |-- rerun.py                # standalone rerun command
+|   |-- config.py               # stable defaults
+|   |-- browser/                # Selenium client, JS fetch script, classification
+|   |-- execution/              # partitioning, workers, WAF stop coordination
+|   |-- persistence/            # checkpoints, active-time progress, run paths
+|   |-- benchmark/              # latency metrics, summaries, monitor
+|   |-- utils/                  # input parsing and product cleanup
+|   `-- logger/                 # UTF-8 file logger setup
+|-- data/
+|   |-- input/                  # source product-ID text files
+|   `-- runs/                   # generated runs and benchmark record
+|-- tests/                      # focused regression tests
+|-- converter/                  # optional XLSX-to-ID-text helper
+`-- README.md
 ```
 
-| Tham số | Mặc định | Ý nghĩa |
-| --- | ---: | --- |
-| `--mode` | `sync` | Chế độ `sync` hoặc `async` |
-| `--input` | `data/input/products-01.txt` | File product ID |
-| `--output` | `data/output` | Thư mục JSON đầu ra |
-| `--batch-size` | `1000` | Số ID trong một file JSON |
-| `--delay` | `1` | Delay giữa request sync, tính bằng giây |
-| `--concurrency` | `5` | Số request async đồng thời |
-| `--rate-limit` | `10` | Rate async, request/giây |
-| `--timeout` | `12` | Timeout mỗi request, tính bằng giây |
-| `--retries` | `3` | Số lần thử tối đa |
-| `--proxy` | Không có | Proxy HTTP/HTTPS/SOCKS5 |
+## Run Output
 
-## 8. Proxy và log
-
-Truyền proxy trực tiếp qua CLI:
-
-```powershell
-uv run python main.py --mode async `
-	--proxy "socks5://user:password@host:port"
+```text
+<run-dir>/
+|-- benchmark_manifest.json       # fixed settings; protects correct resume
+|-- benchmark_summary.json        # final aggregate metrics
+|-- benchmark.log                 # aggregate lifecycle and summary log
+|-- throughput_milestones.jsonl   # monitor observations, if used
+`-- workers/
+    |-- browser-01/
+    |   |-- checkpoints/
+    |   |   |-- success/          # successful product JSONL journals
+    |   |   |-- not_found/        # 404/410 JSONL journals
+    |   |   `-- final/            # immutable completed-batch JSON
+    |   |-- logs/
+    |   |   |-- events.log        # request/classification events
+    |   |   `-- not_found.log     # compact 404/410 ID log
+    |   `-- metrics/
+    |       |-- terminal.jsonl    # terminal result latency records
+    |       `-- progress.json     # cumulative active elapsed seconds
+    `-- browser-02/ ...
 ```
 
-Hoặc dùng biến môi trường:
+For a rerun, the root also contains `rerun_metadata.json`, `rerun_ids.txt`, and
+`rerun_summary.json`.
 
-```powershell
-$env:TIKI_PROXY = "socks5://user:password@host:port"
-uv run python main.py --mode async
+## Engineering Lessons
+
+- **Data first:** keep collecting valid API data with a stable browser setup,
+  even before the rate is ideal. A reliable baseline is more useful than an
+  aggressive design that loses or misclassifies data.
+- **Improve gradually:** measure one concurrency or browser-count change at a
+  time, then keep only improvements that remain stable.
+- **Idempotency matters:** durable terminal checkpoints make restarts safe and
+  make repeated commands predictable.
+- **Rerun incomplete data:** retry structured not-found/error IDs in a separate
+  run to recover more data without damaging the original run.
+- **Rate has a cost:** more browsers and higher concurrency can raise throughput,
+  but memory use and tail latency can grow faster than the gain.
+
+## Useful Commands
+
+```bash
+uv run python crawler/main.py crawl --help
+uv run python crawler/main.py monitor --help
+uv run python crawler/rerun.py --help
 ```
 
-Log sự kiện, thành công và lỗi được ghi trong `logs/`. Response HTML lỗi cũng
-được in ra terminal để kiểm tra WAF.
-
-## 9. Lưu ý
-
-- Bắt đầu với concurrency và rate limit thấp.
-- Nếu WAF trả HTML liên tục, hãy dừng crawler và chờ trước khi chạy lại.
-- Không commit proxy chứa username, password hoặc thông tin nhạy cảm.
-- Tuân thủ điều khoản sử dụng của Tiki và giới hạn truy cập phù hợp.
+Use the crawler only with authorization and in accordance with the target
+service's terms and applicable law.

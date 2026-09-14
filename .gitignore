@@ -11,7 +11,9 @@ wheels/
 
 # Data files
 data/output/
-data/runs/
+data/runs/*
+!data/runs/README.md
+!data/runs/BENCHMARK_RESULTS.md
 *.json
 *.log
 node_modules/
