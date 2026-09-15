@@ -115,6 +115,8 @@ The run directory is the durable source of truth after a crash:
   records. The aggregate log and summary provide run-level metrics.
 - On a WAF/challenge response, workers stop. Only terminal responses ending at
   or before the shared cutoff timestamp are persisted.
+- WAF and timeout responses receive two bounded retries with 1s then 2s
+  exponential backoff. Success and 404/410 responses are never retried.
 
 ## Monitor a Run
 
@@ -137,7 +139,8 @@ uv run python crawler/rerun.py --source-run data/runs/my-full-run --run-dir data
 
 The source run is never changed. The new run stores its selected IDs in
 `rerun_metadata.json` and `rerun_ids.txt`, then uses the normal crawl command,
-checkpoints, and resume behavior. `rerun_summary.json` reports recovered
+including timeout/WAF retries, checkpoints, and resume behavior.
+`rerun_summary.json` reports recovered
 successes, remaining not-found IDs, unresolved/error IDs, WAF state, and the
 browser-error count.
 
@@ -206,6 +209,7 @@ doubling Chrome memory use. Full methodology and measurements are in
     |   |   `-- not_found.log     # compact 404/410 ID log
     |   `-- metrics/
     |       |-- terminal.jsonl    # terminal result latency records
+    |       |-- errors.jsonl      # retryable browser-error IDs for reruns
     |       `-- progress.json     # cumulative active elapsed seconds
     `-- browser-02/ ...
 ```

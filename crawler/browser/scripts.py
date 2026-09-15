@@ -34,7 +34,8 @@ async function fetchProduct(productId) {
     };
   } catch (error) {
     return {
-      productId, status: null, contentType: '', body: '', error: String(error),
+      productId, status: null, contentType: '', body: '',
+      error: error.name === 'AbortError' ? 'timeout' : String(error),
       startedAt, endedAt: new Date().toISOString(),
       elapsedSeconds: (performance.now() - started) / 1000,
     };

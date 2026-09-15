@@ -13,6 +13,7 @@ SUCCESS_DIRECTORY_NAME = "success"
 NOT_FOUND_DIRECTORY_NAME = "not_found"
 FINAL_DIRECTORY_NAME = "final"
 TERMINAL_METRICS_FILE_NAME = "terminal.jsonl"
+ERROR_JOURNAL_FILE_NAME = "errors.jsonl"
 PROGRESS_FILE_NAME = "progress.json"
 STATE_FILE_NAME = "state.json"
 MANIFEST_FILE_NAME = "benchmark_manifest.json"
@@ -31,6 +32,7 @@ class WorkerRunPaths:
     checkpoints: Path
     logs: Path
     terminal_metrics: Path
+    error_journal: Path
     progress: Path
 
 
@@ -85,6 +87,7 @@ class RunPaths:
             checkpoints=worker_root / CHECKPOINTS_DIRECTORY_NAME,
             logs=worker_root / LOGS_DIRECTORY_NAME,
             terminal_metrics=metrics / TERMINAL_METRICS_FILE_NAME,
+            error_journal=metrics / ERROR_JOURNAL_FILE_NAME,
             progress=metrics / PROGRESS_FILE_NAME,
         )
 

@@ -34,6 +34,29 @@ def append_terminal_metrics(path: Path, results: ClassifiedResults) -> None:
         os.fsync(destination.fileno())
 
 
+def append_error_journal(path: Path, results: ClassifiedResults) -> None:
+    """Append retryable browser-error IDs without treating them as terminal."""
+    errors = [result for result in results if result.classification == "error"]
+    if not errors:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as destination:
+        for result in errors:
+            response = result.response
+            json.dump(
+                {
+                    "id": response.product_id,
+                    "classification": "error",
+                    "error": response.error,
+                    "timestamp": response.ended_at,
+                },
+                destination,
+            )
+            destination.write("\n")
+        destination.flush()
+        os.fsync(destination.fileno())
+
+
 def load_terminal_metrics(path: Path, completed_ids: set[int]) -> list[float]:
     """Read the latest durable latency for each checkpointed terminal ID."""
     if not path.exists():

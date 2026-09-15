@@ -3,8 +3,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from persistence.paths import RunPaths
+from persistence.progress import append_error_journal
 from rerun import collect_selection, load_or_create_selection, write_summary
 
 
@@ -79,3 +81,22 @@ class RerunTests(unittest.TestCase):
             self.assertEqual(summary["remaining_not_found"], 1)
             self.assertEqual(summary["remaining_unfinished_or_error"], 1)
             self.assertTrue((rerun_paths.root / "rerun_summary.json").exists())
+
+    def test_error_journal_records_only_retryable_errors(self) -> None:
+        """The new journal provides structured IDs without terminal checkpointing."""
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "errors.jsonl"
+            error = SimpleNamespace(
+                classification="error",
+                response=SimpleNamespace(
+                    product_id=30, error="timeout", ended_at="2026-09-15T00:00:00Z"
+                ),
+            )
+            success = SimpleNamespace(classification="success", response=error.response)
+
+            append_error_journal(journal, [error, success])
+
+            self.assertEqual(
+                journal.read_text(encoding="utf-8"),
+                '{"id":30,"classification":"error","error":"timeout","timestamp":"2026-09-15T00:00:00Z"}\n',
+            )

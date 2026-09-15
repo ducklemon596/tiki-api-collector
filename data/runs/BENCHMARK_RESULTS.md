@@ -39,8 +39,8 @@ More concurrency was tested, but it was not a good default:
 | Configuration | IDs/hour | Change vs 2 Chrome x C4 | Trade-off |
 | --- | ---: | ---: | --- |
 | 2 Chrome x C4 | 192,140 | baseline | About 2.0 GB combined Chrome working set |
-| 2 Chrome x C8 | 192,187 | +0.02% | Mean latency 236.4 ms; P95 487.8 ms; one classification mismatch |
-| 4 Chrome x C4 | 193,856 | +0.9% | About 3.46-4.08 GB Chrome working set; latency roughly doubled |
+| 2 Chrome x C8 | 199,410 | +3.78% | Mean latency 236.4 ms; P95 487.8 ms; one classification mismatch |
+| 4 Chrome x C4 | 202,856 | +5.58% | About 3.46-4.08 GB Chrome working set; latency roughly doubled |
 
 The extra rate from C8 or four browsers was small compared with the increased
 memory use, tail latency, and operational complexity. Therefore the maintained

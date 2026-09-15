@@ -15,8 +15,10 @@ from browser.classification import (
 from browser.client import BrowserSessionSummary, SeleniumTikiClient
 from config import (
     CHECKPOINT_SYNC_INTERVAL,
+    MAX_RETRY_ATTEMPTS,
     MAX_CONSECUTIVE_BROWSER_ERRORS,
     REQUEST_TIMEOUT_SECONDS,
+    RETRY_BACKOFF_SECONDS,
 )
 from execution.partitioning import BrowserAssignment, ProductId, chunks
 from logger import setup_logger
@@ -27,7 +29,12 @@ from persistence.paths import (
     RunPaths,
     WorkerRunPaths,
 )
-from persistence.progress import append_terminal_metrics, load_active_elapsed, save_active_elapsed
+from persistence.progress import (
+    append_error_journal,
+    append_terminal_metrics,
+    load_active_elapsed,
+    save_active_elapsed,
+)
 from utils.product import ProductRecord
 
 
@@ -128,6 +135,51 @@ def persist_terminal_results(
             raise ValueError("Only terminal results may be persisted")
 
 
+def should_retry(result: ProductFetchResult) -> bool:
+    """Return whether a result is a WAF or explicit timeout eligible for retry."""
+    return result.classification == "waf" or (
+        result.classification == "error"
+        and "timeout" in (result.response.error or "").lower()
+    )
+
+
+def fetch_with_retries(
+    client: SeleniumTikiClient,
+    product_ids: list[ProductId],
+    concurrency: int,
+    event_logger: logging.Logger,
+    state: StopState,
+) -> ClassifiedResults:
+    """Fetch IDs, retrying only WAF/timeout results with bounded backoff."""
+    results: ClassifiedResults = [
+        classify_product_response(response)
+        for response in client.fetch_many(product_ids, concurrency)
+    ]
+    for attempt in range(MAX_RETRY_ATTEMPTS):
+        retry_ids = [
+            result.response.product_id for result in results if should_retry(result)
+        ]
+        if not retry_ids or state.event.is_set():
+            break
+        delay = RETRY_BACKOFF_SECONDS * (2**attempt)
+        event_logger.warning(
+            "Retrying %d WAF/timeout IDs after %.1fs (attempt %d/%d)",
+            len(retry_ids), delay, attempt + 1, MAX_RETRY_ATTEMPTS,
+        )
+        time.sleep(delay)
+        if state.event.is_set():
+            break
+        retried = {
+            response.product_id: classify_product_response(response)
+            for response in client.fetch_many(retry_ids, concurrency)
+        }
+        results = [
+            retried.get(result.response.product_id, result) if should_retry(result) else result
+            for result in results
+        ]
+    return results
+
+
 def process_fetch_chunk(
     client: SeleniumTikiClient,
     product_ids: list[ProductId],
@@ -140,10 +192,7 @@ def process_fetch_chunk(
     browser_errors: int,
 ) -> tuple[ClassifiedResults, int]:
     """Fetch, classify, log, and make shared stop decisions for one Selenium call."""
-    results: ClassifiedResults = [
-        classify_product_response(response)
-        for response in client.fetch_many(product_ids, concurrency)
-    ]
+    results = fetch_with_retries(client, product_ids, concurrency, event_logger, state)
     challenges = [result for result in results if result.classification == "waf"]
     if challenges:
         first_challenge = min(challenges, key=lambda result: result.response.ended_at)
@@ -218,6 +267,7 @@ def run_browser(
                         client, product_ids, batch.number, browser, concurrency_per_browser,
                         event_logger, not_found_logger, state, browser_errors,
                     )
+                    append_error_journal(paths.error_journal, results)
                     with state.lock:
                         cutoff = state.cutoff
                     persist_terminal_results(batch, paths.terminal_metrics, results, cutoff)

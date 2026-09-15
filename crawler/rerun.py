@@ -142,7 +142,7 @@ def write_summary(run_dir: Path, source_run: Path, selection: RerunSelection) ->
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run or resume selected IDs through the unchanged normal crawl pipeline."""
+    """Run or resume selected IDs through the normal crawler and its retries."""
     parser = argparse.ArgumentParser(description="Retry prior not-found/error IDs")
     parser.add_argument("--source-run", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
