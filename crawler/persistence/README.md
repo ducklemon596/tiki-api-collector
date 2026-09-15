@@ -16,13 +16,13 @@ Execution workers write through this package. Benchmark summaries and monitoring
 ## Outputs
 
 - Isolated `workers/browser-XX` paths.
-- Append-only success/not-found JSONL journals, `state.json`, final batch JSON, `progress.json`, and terminal metrics JSONL.
+- Append-only success/not-found JSONL journals, resumable error JSONL, `state.json`, final batch JSON, `progress.json`, and terminal metrics JSONL.
 
 ## Important Files
 
 - `paths.py` - run and checkpoint path dataclasses; preserves legacy on-disk names.
 - `checkpoint.py` - append-only checkpoints, partial-final-line repair, finalization, manifests, and atomic JSON writing.
-- `progress.py` - active elapsed persistence and durable terminal latency journals.
+- `progress.py` - active elapsed persistence plus durable terminal and browser-error journals.
 
 ## Design Notes
 

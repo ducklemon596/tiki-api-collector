@@ -1,58 +1,49 @@
 # Selenium Crawler Benchmark Results
 
-This file keeps the useful results from the controlled browser-fetch tests.
-All tests used a persistent Chrome session, browser-side JavaScript `fetch()`,
-zero artificial delay, and bounded concurrency. Success is HTTP 200 with valid
-JSON; 404/410 is not-found. WAF and browser failures were not checkpointed as
-complete.
+This file keeps the benchmark history and the final stable 20,000-ID
+comparison in one place. All tests use persistent Chrome sessions,
+browser-side JavaScript `fetch()`, zero artificial delay, and bounded browser
+concurrency. `C<N>` means `<N>` concurrent in-page fetch workers per Chrome.
 
-`C<N>` means `<N>` concurrent browser-side fetch workers per Chrome.
+## Benchmark History and Stable Comparison
 
-## Improvement Path
+| Stage | Configuration | Sample | Aggregate fetches | IDs/hour | Mean / median / P95 latency | WAF / errors | Notes |
+| --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| Starting point | 1 Chrome x C1 | 500 | 1 | 28,061 | 113.8 / 82.0 / 285.9 ms | 0 / 0 | Sequential browser fetches |
+| Bounded browser concurrency | 1 Chrome x C4 | 500 | 4 | 70,297 | 121.1 / 106.8 / 228.5 ms | 0 / 0 | 2.51x vs C1 on the same sample |
+| Stable single-browser baseline | 1 Chrome x C4 | 10,000 | 4 | 113,234 | 105.8 / 93.6 / 175.7 ms | 0 / 0 | Stable 10k baseline |
+| Higher single-browser concurrency | 1 Chrome x C8 | 10,000 | 8 | 152,620 | 137.6 / 132.5 / 276.9 ms | 0 / 0 | 1.35x vs 1 Chrome x C4 |
+| Two-browser baseline | 2 Chrome x C4 | 10,000 | 8 | 192,140 | 134.6 / 122.6 / 286.5 ms | 0 / 0 | Maintained default baseline |
+| Historical scale comparison | 2 Chrome x C8 | 10,000 | 16 | 199,410 | 236.4 / not retained / 487.8 ms | 0 / 0 | +3.78%; one classification mismatch |
+| Historical scale comparison | 4 Chrome x C4 | 10,000 | 16 | 202,856 | approximately doubled | 0 / 0 | +5.58%; about 3.46-4.08 GB Chrome working set |
+| **Stable comparison (default)** | **2 Chrome x C4** | **20,000** | **8** | **193,457** | **136.1 / 126.7 / 280.5 ms** | **0 / 0** | **Completed; 20k baseline** |
+| Stable comparison | 2 Chrome x C8 | 20,000 | 16 | 200,086 | 245.7 / 236.6 / 484.3 ms | 0 / 0 | Completed; +3.4% vs 2 Chrome x C4 |
+| Stable comparison | 4 Chrome x C4 | 20,000 | 16 | 199,951 | 265.7 / 240.9 / 577.1 ms | 0 / 0 | Completed; +3.4% vs 2 Chrome x C4 |
 
-| Step | Configuration | Sample | IDs/hour | Mean / median / P95 latency | WAF / errors |
-| --- | --- | ---: | ---: | --- | --- |
-| Starting point | 1 Chrome x C1 | 500 | 28,061 | 113.8 / 82.0 / 285.9 ms | 0 / 0 |
-| Bounded browser concurrency | 1 Chrome x C4 | 500 | 70,297 | 121.1 / 106.8 / 228.5 ms | 0 / 0 |
-| Stable single-browser baseline | 1 Chrome x C4 | 10,000 | 113,234 | 105.8 / 93.6 / 175.7 ms | 0 / 0 |
-| Higher single-browser concurrency | 1 Chrome x C8 | 10,000 | 152,620 | 137.6 / 132.5 / 276.9 ms | 0 / 0 |
-| Maintained default | 2 Chrome x C4 | 10,000 | 192,140 | 134.6 / 122.6 / 286.5 ms | 0 / 0 |
+## Conclusion
 
-## Measured Gains
+- C1 to C4 in one Chrome improved the same 500-ID sample from 28,061 to
+  70,297 IDs/hour (**2.51x**).
+- One Chrome x C8 reached 152,620 IDs/hour, then two Chrome x C4 reached
+  192,140 IDs/hour while holding aggregate concurrency at eight.
+- In the stable 20,000-ID comparison, 2 Chrome x C8 and 4 Chrome x C4 each
+  gained about **3.4%** over 2 Chrome x C4 but substantially increased latency.
+- **2 Chrome x C4 remains the default** because it has the clearest rate,
+  latency, memory, and operational-complexity trade-off.
 
-- **C1 to C4 in one Chrome:** 28,061 to 70,297 IDs/hour, a **2.51x** gain on
-  the same 500-ID sample.
-- **One Chrome C4 to C8:** 113,234 to 152,620 IDs/hour, a **1.35x** gain
-  (+34.8%) on the same 10,000-ID sample. Mean latency rose 30.1% and P95 rose
-  57.6%.
-- **One Chrome C8 to two Chrome C4:** 152,620 to 192,140 IDs/hour, a **1.25x**
-  gain (+23.5%) while holding aggregate fetch concurrency at 8. The final
-  success/not-found split remained exactly 6,699 / 3,301.
-- The maintained 2 Chrome x C4 configuration measured **6.61x** the throughput
-  of the earliest 1 Chrome x C1 trial. This is a useful direction-of-travel
-  figure, not a strict like-for-like comparison because the samples differ.
-
-## Why the Default Stops at 2 Chrome x C4
-
-More concurrency was tested, but it was not a good default:
-
-| Configuration | IDs/hour | Change vs 2 Chrome x C4 | Trade-off |
-| --- | ---: | ---: | --- |
-| 2 Chrome x C4 | 192,140 | baseline | About 2.0 GB combined Chrome working set |
-| 2 Chrome x C8 | 199,410 | +3.78% | Mean latency 236.4 ms; P95 487.8 ms; one classification mismatch |
-| 4 Chrome x C4 | 202,856 | +5.58% | About 3.46-4.08 GB Chrome working set; latency roughly doubled |
-
-The extra rate from C8 or four browsers was small compared with the increased
-memory use, tail latency, and operational complexity. Therefore the maintained
-configuration is **2 Chrome x C4**.
+The four-browser validation includes corrected handling of challenge-skipped
+and transient browser-network results. These remain resumable unless they
+exhaust the bounded retry policy; no terminal checkpoint format changed.
 
 ## Reproducibility Notes
 
-- The 10,000-ID tests use the first ten deterministic input batches.
-- With two browsers, the first browser receives positions 1-5,000 and the
-  second receives positions 5,001-10,000.
+- The stable comparison uses the first 20 deterministic input batches
+  (20,000 IDs). Earlier rows retain their original 500-ID or 10,000-ID samples.
+- IDs are split into contiguous deterministic partitions. With two browsers,
+  each receives 10,000 IDs; with four browsers, each receives 5,000 IDs.
 - Each worker owns separate checkpoints, logs, progress, and terminal metrics.
 - A manifest prevents a run directory from being resumed with incompatible
   batch range, browser concurrency, browser count, or Selenium call size.
+- Active elapsed time excludes idle time between resumed attempts.
 - Throughput varies with the host, network, and upstream service. These numbers
   are measured observations, not guaranteed production rates.

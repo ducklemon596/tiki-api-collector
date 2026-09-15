@@ -28,5 +28,8 @@ Owns Selenium Chrome transport, bounded in-page JavaScript fetching, raw respons
 
 - JavaScript creates at most `min(concurrency, ID count)` workers; it never creates one promise per ID without a bound.
 - Indexed result slots preserve input order, while every result also carries a product ID.
+- A challenge stops new in-page requests. IDs that were not started receive an
+  explicit transient result so the execution layer can retry them safely rather
+  than mistaking sparse JavaScript-array slots for terminal browser failures.
 - HTTP 200 plus valid JSON and 404/410 are terminal. Challenges and browser/network errors remain resumable.
 - Aggregate statistics are deferred to worker/run boundaries rather than calculated for every product.

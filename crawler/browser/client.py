@@ -1,6 +1,7 @@
 """Persistent Selenium transport and raw browser-result normalization."""
 
 from datetime import datetime
+import logging
 import math
 import statistics
 import time
@@ -8,12 +9,17 @@ from typing import Literal, TypeAlias, TypeGuard, TypedDict
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.chrome.service import Service
 
 from browser.classification import BrowserFetchResponse, ProductFetchResult
 from browser.scripts import BOUNDED_FETCH_SCRIPT
+from config import CHROMEDRIVER_PATH
 from utils.product import ProductRecord
 
 RawBrowserResults: TypeAlias = list[object]
+EMPTY_SCRIPT_RESULT_ERROR = "browser script returned no result"
+MISSING_SCRIPT_ENTRY_ERROR = "browser script omitted a result entry"
+SKIPPED_AFTER_CHALLENGE_ERROR = "not requested after another request received a challenge"
 
 
 class BrowserSessionSummary(TypedDict):
@@ -36,7 +42,7 @@ class BrowserSessionSummary(TypedDict):
 def _fallback_results(
     product_ids: list[int], timestamp: str, error: str
 ) -> RawBrowserResults:
-    """Create retryable browser-error slots for every requested ID."""
+    """Create resumable browser-error slots for every requested ID."""
     results: RawBrowserResults = []
     for product_id in product_ids:
         results.append(
@@ -62,7 +68,7 @@ def _normalise_script_results(
         message = (
             str(raw_results.get("error"))
             if isinstance(raw_results, dict) and raw_results.get("error")
-            else f"unexpected JavaScript result: {type(raw_results).__name__}"
+            else f"{EMPTY_SCRIPT_RESULT_ERROR}: {type(raw_results).__name__}"
         )
         return _fallback_results(product_ids, timestamp, message)
     return [
@@ -80,9 +86,12 @@ def _response_from_raw(
     product_id: int, raw: object, timestamp: str, request_number: int
 ) -> BrowserFetchResponse:
     """Convert one JavaScript result slot into a typed browser response."""
-    raw_result = raw if _is_product_record(raw) else {
-        "error": f"unexpected result entry: {type(raw).__name__}"
-    }
+    if _is_product_record(raw):
+        raw_result = raw
+    elif raw is None:
+        raw_result = {"error": f"{MISSING_SCRIPT_ENTRY_ERROR}: NoneType"}
+    else:
+        raw_result = {"error": f"unexpected result entry: {type(raw).__name__}"}
     status = raw_result.get("status")
     elapsed_value = raw_result.get("elapsedSeconds")
     elapsed_seconds = (
@@ -106,10 +115,17 @@ def _response_from_raw(
 class SeleniumTikiClient:
     """One reusable Chrome with a bounded in-page product-fetch worker pool."""
 
-    def __init__(self, timeout: float) -> None:
+    def __init__(self, timeout: float, event_logger: logging.Logger | None = None) -> None:
         options = webdriver.ChromeOptions()
-        self.driver = webdriver.Chrome(options=options)
+        if CHROMEDRIVER_PATH.is_file():
+            self.driver = webdriver.Chrome(
+                service=Service(executable_path=str(CHROMEDRIVER_PATH)),
+                options=options,
+            )
+        else:
+            self.driver = webdriver.Chrome(options=options)
         self.request_timeout = timeout
+        self.event_logger = event_logger
         self.driver.set_page_load_timeout(timeout)
         self.driver.set_script_timeout(timeout)
         self.session_started = time.perf_counter()
@@ -144,6 +160,11 @@ class SeleniumTikiClient:
         except WebDriverException as error:
             raw_results = _fallback_results(
                 product_ids, fallback_timestamp, f"{type(error).__name__}: {error.msg}"
+            )
+        if raw_results is None and self.event_logger is not None:
+            self.event_logger.warning(
+                "Selenium async script returned None for %d IDs; retrying this call is safe",
+                len(product_ids),
             )
         normalized = _normalise_script_results(raw_results, product_ids, fallback_timestamp)
         responses: list[BrowserFetchResponse] = []

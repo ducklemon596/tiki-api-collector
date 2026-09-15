@@ -2,11 +2,16 @@
 
 ## Responsibility
 
-Contains the supported two-browser crawler application: browser transport, execution coordination, durable persistence, and optional benchmark reporting.
+Contains the crawler application: browser transport, execution coordination,
+durable persistence, and optional benchmark reporting. The maintained default
+uses two Chrome workers; the CLI also permits four workers for controlled
+benchmark experiments.
 
 ## Where It Fits
 
-`main.py` is the root application entrypoint. It dispatches `crawl` to execution orchestration and `monitor` to the benchmark subsystem.
+`main.py` is the root application entrypoint. It dispatches `crawl` to execution
+orchestration and `monitor` to the benchmark subsystem. `rerun.py` is a small,
+separate entrypoint for replaying persisted non-terminal IDs.
 
 ## Inputs
 
@@ -21,6 +26,7 @@ A run directory containing a manifest, aggregate summary/log, isolated worker st
 ## Important Files
 
 - `main.py` - `crawl` / `monitor` command dispatcher.
+- `rerun.py` - replay command for prior not-found and browser-error IDs.
 - `config.py` - stable application defaults only.
 - `browser/` - Chrome transport, JavaScript, and response policy.
 - `execution/` - partitioning, worker lifecycle, and concurrent coordination.

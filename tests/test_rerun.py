@@ -82,7 +82,7 @@ class RerunTests(unittest.TestCase):
             self.assertEqual(summary["remaining_unfinished_or_error"], 1)
             self.assertTrue((rerun_paths.root / "rerun_summary.json").exists())
 
-    def test_error_journal_records_only_retryable_errors(self) -> None:
+    def test_error_journal_records_only_resumable_errors(self) -> None:
         """The new journal provides structured IDs without terminal checkpointing."""
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory) / "errors.jsonl"

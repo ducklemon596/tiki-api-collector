@@ -1,5 +1,6 @@
 """One-browser worker lifecycle, shared stop state, and terminal persistence."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
@@ -12,13 +13,20 @@ from browser.classification import (
     classify_product_response,
     log_product_result,
 )
-from browser.client import BrowserSessionSummary, SeleniumTikiClient
+from browser.client import (
+    EMPTY_SCRIPT_RESULT_ERROR,
+    MISSING_SCRIPT_ENTRY_ERROR,
+    SKIPPED_AFTER_CHALLENGE_ERROR,
+    BrowserSessionSummary,
+    SeleniumTikiClient,
+)
 from config import (
     CHECKPOINT_SYNC_INTERVAL,
     MAX_RETRY_ATTEMPTS,
     MAX_CONSECUTIVE_BROWSER_ERRORS,
     REQUEST_TIMEOUT_SECONDS,
     RETRY_BACKOFF_SECONDS,
+    WAF_RETRY_DELAYS_SECONDS,
 )
 from execution.partitioning import BrowserAssignment, ProductId, chunks
 from logger import setup_logger
@@ -136,11 +144,71 @@ def persist_terminal_results(
 
 
 def should_retry(result: ProductFetchResult) -> bool:
-    """Return whether a result is a WAF or explicit timeout eligible for retry."""
+    """Return whether a result is a known transient failure eligible for retry.
+
+    WAF/challenge responses use the dedicated cooldown schedule. Timeout,
+    network, and incomplete Selenium-script results use the short transport
+    backoff. All of these outcomes are non-terminal because no checkpoint write
+    has occurred yet.
+    """
     return result.classification == "waf" or (
         result.classification == "error"
-        and "timeout" in (result.response.error or "").lower()
+        and (
+            "timeout" in (result.response.error or "").lower()
+            or "failed to fetch" in (result.response.error or "").lower()
+            or (result.response.error or "").startswith(EMPTY_SCRIPT_RESULT_ERROR)
+            or (result.response.error or "").startswith(MISSING_SCRIPT_ENTRY_ERROR)
+            or (result.response.error or "").startswith(SKIPPED_AFTER_CHALLENGE_ERROR)
+        )
     )
+
+
+def is_transient_error(result: ProductFetchResult) -> bool:
+    """Return whether a non-WAF error may safely be retried in the same run."""
+    return result.classification == "error" and should_retry(result)
+
+
+def wait_for_retry_delay(state: StopState, delay: float) -> bool:
+    """Wait for a retry delay, returning early when another worker stops."""
+    return state.event.wait(delay)
+
+
+def retry_matching_results(
+    client: SeleniumTikiClient,
+    results: ClassifiedResults,
+    concurrency: int,
+    event_logger: logging.Logger,
+    state: StopState,
+    predicate: Callable[[ProductFetchResult], bool],
+    delays: tuple[float, ...],
+    label: str,
+) -> ClassifiedResults:
+    """Retry matching results with interruptible configured backoff delays.
+
+    Results retain their original input order. A shared stop from another
+    browser interrupts the wait so a worker never sleeps through a global stop.
+    """
+    for attempt, delay in enumerate(delays, start=1):
+        retry_ids = [result.response.product_id for result in results if predicate(result)]
+        if not retry_ids or state.event.is_set():
+            break
+        event_logger.warning(
+            "Retrying %d %s results after %.1fs (attempt %d/%d)",
+            len(retry_ids), label, delay, attempt, len(delays),
+        )
+        if wait_for_retry_delay(state, delay):
+            break
+        retried = {
+            response.product_id: classify_product_response(response)
+            for response in client.fetch_many(retry_ids, concurrency)
+        }
+        results = [
+            retried.get(result.response.product_id, result)
+            if predicate(result)
+            else result
+            for result in results
+        ]
+    return results
 
 
 def fetch_with_retries(
@@ -150,34 +218,59 @@ def fetch_with_retries(
     event_logger: logging.Logger,
     state: StopState,
 ) -> ClassifiedResults:
-    """Fetch IDs, retrying only WAF/timeout results with bounded backoff."""
+    """Fetch IDs with WAF cooldowns and short transient-error retries.
+
+    WAF/challenge responses wait 5, 10, then 20 minutes before retrying. Other
+    known transient browser failures retain the existing short exponential
+    backoff. A final WAF is returned to the caller, which records the shared
+    stop; no non-terminal result is checkpointed here.
+    """
     results: ClassifiedResults = [
         classify_product_response(response)
         for response in client.fetch_many(product_ids, concurrency)
     ]
-    for attempt in range(MAX_RETRY_ATTEMPTS):
-        retry_ids = [
-            result.response.product_id for result in results if should_retry(result)
-        ]
-        if not retry_ids or state.event.is_set():
-            break
-        delay = RETRY_BACKOFF_SECONDS * (2**attempt)
-        event_logger.warning(
-            "Retrying %d WAF/timeout IDs after %.1fs (attempt %d/%d)",
-            len(retry_ids), delay, attempt + 1, MAX_RETRY_ATTEMPTS,
-        )
-        time.sleep(delay)
-        if state.event.is_set():
-            break
-        retried = {
-            response.product_id: classify_product_response(response)
-            for response in client.fetch_many(retry_ids, concurrency)
-        }
-        results = [
-            retried.get(result.response.product_id, result) if should_retry(result) else result
-            for result in results
-        ]
-    return results
+    results = retry_matching_results(
+        client,
+        results,
+        concurrency,
+        event_logger,
+        state,
+        lambda result: result.classification == "waf",
+        WAF_RETRY_DELAYS_SECONDS,
+        "WAF/challenge",
+    )
+    if state.event.is_set() or any(result.classification == "waf" for result in results):
+        return results
+    transient_delays = tuple(
+        RETRY_BACKOFF_SECONDS * (2**attempt)
+        for attempt in range(MAX_RETRY_ATTEMPTS)
+    )
+    results = retry_matching_results(
+        client,
+        results,
+        concurrency,
+        event_logger,
+        state,
+        is_transient_error,
+        transient_delays,
+        "transient browser",
+    )
+    # A transient retry can itself receive a challenge. Give that newly observed
+    # WAF the same cooldown policy before process_fetch_chunk makes a stop call.
+    if state.event.is_set() or not any(
+        result.classification == "waf" for result in results
+    ):
+        return results
+    return retry_matching_results(
+        client,
+        results,
+        concurrency,
+        event_logger,
+        state,
+        lambda result: result.classification == "waf",
+        WAF_RETRY_DELAYS_SECONDS,
+        "WAF/challenge",
+    )
 
 
 def process_fetch_chunk(
@@ -245,7 +338,9 @@ def run_browser(
 
     client: SeleniumTikiClient | None = None
     try:
-        client = SeleniumTikiClient(timeout=REQUEST_TIMEOUT_SECONDS)
+        client = SeleniumTikiClient(
+            timeout=REQUEST_TIMEOUT_SECONDS, event_logger=event_logger
+        )
         event_logger.info(
             "Opening Chrome %02d with browser concurrency %d", browser, concurrency_per_browser
         )

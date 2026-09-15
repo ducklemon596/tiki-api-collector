@@ -9,6 +9,15 @@ const results = new Array(ids.length);
 let nextIndex = 0;
 let challengeSeen = false;
 
+function skippedAfterChallenge(productId) {
+  const timestamp = new Date().toISOString();
+  return {
+    productId, status: null, contentType: '', body: '',
+    error: 'not requested after another request received a challenge',
+    startedAt: timestamp, endedAt: timestamp, elapsedSeconds: 0,
+  };
+}
+
 async function fetchProduct(productId) {
   const startedAt = new Date().toISOString();
   const started = performance.now();
@@ -56,6 +65,15 @@ async function worker() {
 }
 
 Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, worker))
-  .then(() => done(results))
+  .then(() => {
+    // A challenge stops new requests, but every caller ID still needs an
+    // explicit resumable result instead of a sparse-array hole.
+    for (let index = 0; index < ids.length; index += 1) {
+      if (results[index] === undefined) {
+        results[index] = skippedAfterChallenge(ids[index]);
+      }
+    }
+    done(results);
+  })
   .catch((error) => done({ error: String(error) }));
 """

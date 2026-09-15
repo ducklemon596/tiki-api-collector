@@ -20,7 +20,7 @@ This folder is the default home for generated crawl runs and the retained human-
 
 ## Important Files
 
-- `BENCHMARK_RESULTS.md` — recorded 500- to 10,000-ID controlled comparisons and notes on historical multi-browser experiments.
+- `BENCHMARK_RESULTS.md` — recorded 500- to 20,000-ID controlled comparisons and notes on historical multi-browser experiments.
 - `<run>/benchmark_summary.json` — final authoritative summary for one completed or stopped run.
 - `<run>/workers/browser-XX/` — isolated durable state for one browser worker.
 

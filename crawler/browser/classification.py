@@ -45,7 +45,7 @@ def _is_product_record(value: object) -> TypeGuard[ProductRecord]:
 
 
 def classify_product_response(response: BrowserFetchResponse) -> ProductFetchResult:
-    """Apply the crawler's terminal/retryable classification policy to one response."""
+    """Classify one response as terminal or resumable under crawler policy."""
     content_type = response.content_type.lower()
     if response.error:
         return ProductFetchResult(response, "error", detail=f" error={response.error}")

@@ -35,7 +35,7 @@ def append_terminal_metrics(path: Path, results: ClassifiedResults) -> None:
 
 
 def append_error_journal(path: Path, results: ClassifiedResults) -> None:
-    """Append retryable browser-error IDs without treating them as terminal."""
+    """Append resumable browser-error IDs without treating them as terminal."""
     errors = [result for result in results if result.classification == "error"]
     if not errors:
         return

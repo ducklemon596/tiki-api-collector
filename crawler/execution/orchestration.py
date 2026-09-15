@@ -1,4 +1,4 @@
-"""CLI crawl composition for two browser workers."""
+"""CLI crawl composition for the configured browser-worker count."""
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from config import (
+    ALLOWED_BROWSER_COUNTS,
     ALLOWED_BROWSER_CONCURRENCY,
     BROWSER_COUNT,
     DEFAULT_BROWSER_CONCURRENCY,
@@ -43,7 +44,7 @@ class CrawlExecution:
 
 
 def main(argv: Sequence[str] | None = None) -> CrawlExecution:
-    """Parse crawl options, run both workers, and return their execution result.
+    """Parse crawl options, run configured workers, and return their result.
 
     Benchmark aggregation intentionally happens outside this module. That
     keeps workload selection, manifest preparation, and Chrome lifecycle
@@ -61,6 +62,7 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
         type=int,
         default=DEFAULT_BROWSER_CONCURRENCY,
     )
+    parser.add_argument("--browser-count", choices=ALLOWED_BROWSER_COUNTS, type=int, default=BROWSER_COUNT)
     parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
     args = parser.parse_args(argv)
     if args.selenium_call_size < 1:
@@ -75,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
     if not selected:
         parser.error("No input batches selected")
 
-    assignments = contiguous_assignments(selected, BROWSER_COUNT)
+    assignments = contiguous_assignments(selected, args.browser_count)
     run_paths = RunPaths(args.run_dir)
     run_paths.root.mkdir(parents=True, exist_ok=True)
     prepare_manifest(
@@ -84,7 +86,7 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
             "input_file": str(DEFAULT_INPUT_FILE),
             "start_batch": selected[0][0],
             "end_batch": selected[-1][0],
-            "browser_count": BROWSER_COUNT,
+            "browser_count": args.browser_count,
             "concurrency_per_browser": args.concurrency_per_browser,
             "selenium_call_size": args.selenium_call_size,
             "selected_id_count": sum(len(ids) for _, ids in selected),
@@ -95,13 +97,13 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
     aggregate_logger = setup_logger("multi_browser_aggregate", run_paths.aggregate_log)
     aggregate_logger.info(
         "Starting/resuming %d Chrome x %d fetches; input total=%d selected_batches=%d-%d; partitions=contiguous",
-        BROWSER_COUNT, args.concurrency_per_browser, total_ids,
+        args.browser_count, args.concurrency_per_browser, total_ids,
         selected[0][0], selected[-1][0],
     )
     state = StopState()
     started = time.perf_counter()
     with ThreadPoolExecutor(
-        max_workers=BROWSER_COUNT, thread_name_prefix="chrome"
+        max_workers=args.browser_count, thread_name_prefix="chrome"
     ) as executor:
         futures = [
             executor.submit(
@@ -113,7 +115,7 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
                 args.concurrency_per_browser,
                 state,
             )
-            for index in range(BROWSER_COUNT)
+            for index in range(args.browser_count)
         ]
         worker_runs = [future.result() for future in futures]
 
@@ -123,6 +125,6 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
         run_dir=args.run_dir,
         current_attempt_elapsed=time.perf_counter() - started,
         configuration=(
-            f"{BROWSER_COUNT} Chrome x {args.concurrency_per_browser} browser fetches"
+            f"{args.browser_count} Chrome x {args.concurrency_per_browser} browser fetches"
         ),
     )

@@ -1,4 +1,4 @@
-"""Friendly command-line entry point for the supported two-browser crawler."""
+"""Friendly command-line entry point for the crawler and throughput monitor."""
 
 import argparse
 import sys
@@ -21,7 +21,7 @@ def run_crawl_command(argv: Sequence[str]) -> None:
         argv: Crawl-specific command-line arguments after ``crawl``.
 
     Side Effects:
-        Starts the two Chrome workers through ``execution`` and writes the
+        Starts the configured Chrome workers through ``execution`` and writes the
         unchanged per-browser event summaries plus aggregate
         ``benchmark_summary.json``.
     """
@@ -58,7 +58,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     Input: ``crawl`` or ``monitor`` followed by that command's options. Output: the
     selected command's normal console output and durable files in its run directory.
     """
-    parser = argparse.ArgumentParser(description="Two-browser resumable Tiki crawler")
+    parser = argparse.ArgumentParser(description="Resumable Tiki crawler")
     parser.add_argument("command", choices=("crawl", "monitor"))
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:

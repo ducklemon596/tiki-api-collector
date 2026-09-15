@@ -20,6 +20,8 @@ Tests validate small, deterministic units without starting a Chrome browser or c
 
 - `test_description_cleaning.py` — verifies product-description whitespace normalization.
 - `test_selenium_metrics.py` — verifies `record_result()` does not rebuild expensive summary statistics for every product.
+- `test_retries.py` — verifies WAF cooldowns and short retry behavior without Selenium.
+- `test_rerun.py` — verifies deterministic structured rerun selection and summaries.
 
 ## Design Notes
 

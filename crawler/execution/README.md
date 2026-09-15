@@ -6,7 +6,9 @@ Owns crawl execution rather than benchmark analysis: deterministic workload part
 
 ## Where It Fits
 
-`main.py crawl` calls `orchestration.py`. It starts two worker threads, each of which owns one Chrome and one isolated persistence tree.
+`main.py crawl` calls `orchestration.py`. The default starts two worker threads,
+each with one Chrome and one isolated persistence tree. `--browser-count 4` is
+available for controlled benchmark experiments.
 
 ## Inputs
 
@@ -21,7 +23,7 @@ Owns crawl execution rather than benchmark analysis: deterministic workload part
 
 ## Important Files
 
-- `orchestration.py` - crawl CLI parser and two-worker composition.
+- `orchestration.py` - crawl CLI parser and worker composition.
 - `partitioning.py` - ordered chunking and contiguous browser assignments.
 - `worker.py` - stop state, resumable batches, worker lifecycle, and terminal persistence decisions.
 
@@ -29,5 +31,10 @@ Owns crawl execution rather than benchmark analysis: deterministic workload part
 
 - Selected IDs are split into deterministic contiguous partitions before either browser starts.
 - Each worker owns its checkpoint/log/metric files; no checkpoint has concurrent writers.
-- The first WAF response records a shared cutoff. Only terminal results ending at or before that timestamp are persisted.
-- Repeated browser errors stop new work; WAF and error results are deliberately left resumable.
+- A WAF first stops new in-page request scheduling, then retries after 5, 10,
+  and 20 minutes. Only a WAF still present after those attempts records the
+  shared cutoff. Terminal results ending at or before that cutoff are persisted.
+- Browser errors are counted across a worker attempt; reaching the configured
+  threshold stops new work. WAF and error results remain resumable.
+- Timeouts and known transient browser transport failures retry with the short
+  1/2-second exponential backoff. HTTP 404/410 is terminal and never retried.
