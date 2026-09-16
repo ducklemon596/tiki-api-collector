@@ -1,4 +1,4 @@
-"""Typed response models and crawler response-classification policy."""
+"""Typed response models and collector response-classification policy."""
 
 from dataclasses import dataclass
 import logging
@@ -45,7 +45,7 @@ def _is_product_record(value: object) -> TypeGuard[ProductRecord]:
 
 
 def classify_product_response(response: BrowserFetchResponse) -> ProductFetchResult:
-    """Classify one response as terminal or resumable under crawler policy."""
+    """Classify one response as terminal or resumable under collector policy."""
     content_type = response.content_type.lower()
     if response.error:
         return ProductFetchResult(response, "error", detail=f" error={response.error}")

@@ -1,4 +1,4 @@
-"""Friendly command-line entry point for the crawler and throughput monitor."""
+"""Friendly command-line entry point for the collector and throughput monitor."""
 
 import argparse
 import sys
@@ -8,24 +8,24 @@ import ujson as json
 
 from benchmark.monitor import main as monitor_main
 from benchmark.summary import build_aggregate_summary, build_browser_summary
-from execution.orchestration import main as crawl_main
+from execution.orchestration import main as collect_main
 from logger import setup_logger
 from persistence.checkpoint import write_json_atomically
 from persistence.paths import EVENTS_LOG_FILE_NAME, RunPaths
 
 
-def run_crawl_command(argv: Sequence[str]) -> None:
-    """Run crawl execution, then create durable benchmark summaries.
+def run_collect_command(argv: Sequence[str]) -> None:
+    """Run collection execution, then create durable benchmark summaries.
 
     Args:
-        argv: Crawl-specific command-line arguments after ``crawl``.
+        argv: Collection-specific command-line arguments after ``collect``.
 
     Side Effects:
         Starts the configured Chrome workers through ``execution`` and writes the
         unchanged per-browser event summaries plus aggregate
         ``benchmark_summary.json``.
     """
-    execution = crawl_main(argv)
+    execution = collect_main(argv)
     browser_runs = [
         build_browser_summary(worker_run) for worker_run in execution.worker_runs
     ]
@@ -53,20 +53,20 @@ def run_crawl_command(argv: Sequence[str]) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Dispatch to the crawler or its read-only throughput monitor.
+    """Dispatch to the collector or its read-only throughput monitor.
 
-    Input: ``crawl`` or ``monitor`` followed by that command's options. Output: the
+    Input: ``collect`` or ``monitor`` followed by that command's options. Output: the
     selected command's normal console output and durable files in its run directory.
     """
-    parser = argparse.ArgumentParser(description="Resumable Tiki crawler")
-    parser.add_argument("command", choices=("crawl", "monitor"))
+    parser = argparse.ArgumentParser(description="Resumable Tiki collector")
+    parser.add_argument("command", choices=("collect", "monitor"))
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:
         parser.print_help()
         return
     command = parser.parse_args(arguments[:1]).command
-    if command == "crawl":
-        run_crawl_command(arguments[1:])
+    if command == "collect":
+        run_collect_command(arguments[1:])
     else:
         monitor_main(arguments[1:])
 

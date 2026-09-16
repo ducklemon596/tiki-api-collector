@@ -117,7 +117,7 @@ class SeleniumTikiClient:
 
     def __init__(self, timeout: float, event_logger: logging.Logger | None = None) -> None:
         options = webdriver.ChromeOptions()
-        if CHROMEDRIVER_PATH.is_file():
+        if CHROMEDRIVER_PATH is not None and CHROMEDRIVER_PATH.is_file():
             self.driver = webdriver.Chrome(
                 service=Service(executable_path=str(CHROMEDRIVER_PATH)),
                 options=options,
@@ -136,7 +136,7 @@ class SeleniumTikiClient:
         self._summary_call_count = 0
 
     def open_tiki(self) -> None:
-        """Establish the browser context once at crawler startup."""
+        """Establish the browser context once at collector startup."""
         self.driver.get("https://tiki.vn/")
 
     def fetch_many(

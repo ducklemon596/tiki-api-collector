@@ -1,4 +1,4 @@
-"""Retry structured not-found/error IDs through the existing crawl command."""
+"""Retry structured not-found/error IDs through the existing collect command."""
 
 import argparse
 from dataclasses import dataclass
@@ -21,7 +21,7 @@ from config import (
     DEFAULT_SELENIUM_CALL_SIZE,
     INPUT_BATCH_SIZE,
 )
-from main import run_crawl_command
+from main import run_collect_command
 from persistence.checkpoint import write_json_atomically
 from persistence.paths import RunPaths
 
@@ -142,7 +142,7 @@ def write_summary(run_dir: Path, source_run: Path, selection: RerunSelection) ->
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run or resume selected IDs through the normal crawler and its retries."""
+    """Run or resume selected IDs through the normal collector and its retries."""
     parser = argparse.ArgumentParser(description="Retry prior not-found/error IDs")
     parser.add_argument("--source-run", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
@@ -166,14 +166,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         f"error={selection.error_count} duplicates_removed={selection.duplicates_removed} "
         f"total_unique={len(selection.ids)}"
     )
-    crawl_args = [
+    collect_args = [
         "--start-batch", "1", "--end-batch", str(batch_count),
         "--selenium-call-size", str(args.selenium_call_size),
         "--concurrency-per-browser", str(args.concurrency_per_browser),
         "--run-dir", str(args.run_dir),
     ]
     with patch.object(orchestration, "DEFAULT_INPUT_FILE", input_path):
-        run_crawl_command(crawl_args)
+        run_collect_command(collect_args)
     print(json.dumps(write_summary(args.run_dir, args.source_run, selection), indent=2))
 
 

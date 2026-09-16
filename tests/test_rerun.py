@@ -1,9 +1,13 @@
 """Tests for the standalone structured-artifact rerun helper."""
 
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
 
 from persistence.paths import RunPaths
 from persistence.progress import append_error_journal

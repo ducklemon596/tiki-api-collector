@@ -78,7 +78,7 @@ def snapshot(run_dir: Path, counter: TerminalCounter) -> ProgressSnapshot | None
 def benchmark_finished(summary_path: Path) -> bool:
     """Return whether a durable summary records completion or a terminal stop.
 
-    A missing summary remains resumable because the crawler may restart after a crash.
+    A missing summary remains resumable because the collector may restart after a crash.
     A summary with a stop reason ends monitoring; otherwise every assigned ID must have
     reached a success or not-found checkpoint.
     """

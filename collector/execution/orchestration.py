@@ -1,4 +1,4 @@
-"""CLI crawl composition for the configured browser-worker count."""
+"""CLI collection composition for the configured browser-worker count."""
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -28,7 +28,7 @@ from utils.input import load_and_batch_ids
 
 
 @dataclass(frozen=True)
-class CrawlExecution:
+class CollectionExecution:
     """Completed worker execution supplied to the benchmark reporting layer.
 
     The execution package produces this boundary object without calculating
@@ -43,8 +43,8 @@ class CrawlExecution:
     configuration: str
 
 
-def main(argv: Sequence[str] | None = None) -> CrawlExecution:
-    """Parse crawl options, run configured workers, and return their result.
+def main(argv: Sequence[str] | None = None) -> CollectionExecution:
+    """Parse collection options, run configured workers, and return their result.
 
     Benchmark aggregation intentionally happens outside this module. That
     keeps workload selection, manifest preparation, and Chrome lifecycle
@@ -119,7 +119,7 @@ def main(argv: Sequence[str] | None = None) -> CrawlExecution:
         ]
         worker_runs = [future.result() for future in futures]
 
-    return CrawlExecution(
+    return CollectionExecution(
         worker_runs=worker_runs,
         state=state,
         run_dir=args.run_dir,

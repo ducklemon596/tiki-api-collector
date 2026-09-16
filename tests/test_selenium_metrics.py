@@ -1,9 +1,10 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "crawler"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
 
 from browser.client import (
     BrowserFetchResponse,
@@ -37,6 +38,45 @@ class SeleniumMetricTests(unittest.TestCase):
         self.assertIsNone(client.record_result(ProductFetchResult(response, "success", {})))
         self.assertEqual(client.counts["success"], 1)
         self.assertEqual(client._fetch_latencies, [0.125])
+
+    def test_explicit_existing_chromedriver_path_uses_service(self) -> None:
+        """An existing configured driver path is passed to Selenium as a service."""
+        driver = Mock()
+        driver.set_page_load_timeout = Mock()
+        driver.set_script_timeout = Mock()
+        configured_path = Path("C:/tools/chromedriver.exe")
+        with (
+            patch("browser.client.CHROMEDRIVER_PATH", configured_path),
+            patch.object(Path, "is_file", return_value=True),
+            patch("browser.client.Service") as service,
+            patch("browser.client.webdriver.Chrome", return_value=driver) as chrome,
+        ):
+            SeleniumTikiClient(timeout=10)
+
+        service.assert_called_once_with(executable_path=str(configured_path))
+        chrome.assert_called_once()
+        self.assertIs(chrome.call_args.kwargs["service"], service.return_value)
+
+    def test_missing_or_unconfigured_driver_uses_selenium_default(self) -> None:
+        """No usable configured path leaves driver resolution to Selenium."""
+        for configured_path in (None, Path("C:/missing/chromedriver.exe")):
+            with self.subTest(configured_path=configured_path):
+                driver = Mock()
+                driver.set_page_load_timeout = Mock()
+                driver.set_script_timeout = Mock()
+                with (
+                    patch("browser.client.CHROMEDRIVER_PATH", configured_path),
+                    patch.object(Path, "is_file", return_value=False),
+                    patch("browser.client.Service") as service,
+                    patch(
+                        "browser.client.webdriver.Chrome", return_value=driver
+                    ) as chrome,
+                ):
+                    SeleniumTikiClient(timeout=10)
+
+                service.assert_not_called()
+                chrome.assert_called_once()
+                self.assertNotIn("service", chrome.call_args.kwargs)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,13 @@
 """Focused retry-policy tests without starting Selenium."""
 
 import logging
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import ANY, patch
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
 
 from browser.classification import BrowserFetchResponse
 from browser.client import EMPTY_SCRIPT_RESULT_ERROR, SKIPPED_AFTER_CHALLENGE_ERROR

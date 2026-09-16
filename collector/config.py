@@ -1,4 +1,4 @@
-"""Stable defaults for the crawler and controlled browser-count benchmarks."""
+"""Stable defaults for the collector and controlled browser-count benchmarks."""
 
 from pathlib import Path
 import re
@@ -7,11 +7,11 @@ import re
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_INPUT_FILE = DATA_DIR / "input" / "products-01.txt"
-DEFAULT_RUN_DIR = DATA_DIR / "runs" / "default-crawl"
+DEFAULT_RUN_DIR = DATA_DIR / "runs" / "default-collection"
 # Optional local ChromeDriver override. Selenium Manager is used when absent.
-CHROMEDRIVER_PATH = Path(r"C:\tools\chromedriver-win64\chromedriver.exe")
+CHROMEDRIVER_PATH: Path | None = None
 
-# Default crawler behavior; four browsers are allowed for controlled benchmarks.
+# Default collector behavior; four browsers are allowed for controlled benchmarks.
 BROWSER_COUNT = 2
 ALLOWED_BROWSER_COUNTS = (2, 4)
 DEFAULT_BROWSER_CONCURRENCY = 4

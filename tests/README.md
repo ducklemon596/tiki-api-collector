@@ -2,15 +2,17 @@
 
 ## Responsibility
 
-Contains focused regression tests for behavior that is easy to break during crawler maintenance.
+This folder contains focused regression tests for collector behavior that is
+easy to break during maintenance.
 
 ## Where It Fits
 
-Tests validate small, deterministic units without starting a Chrome browser or contacting the target API.
+The tests check small, deterministic units. They do not start Chrome or call
+the target API.
 
 ## Inputs
 
-- The crawler source modules and the configured Python environment.
+- The collector source modules and configured Python environment.
 
 ## Outputs
 
@@ -18,12 +20,12 @@ Tests validate small, deterministic units without starting a Chrome browser or c
 
 ## Important Files
 
-- `test_description_cleaning.py` — verifies product-description whitespace normalization.
-- `test_selenium_metrics.py` — verifies `record_result()` does not rebuild expensive summary statistics for every product.
-- `test_retries.py` — verifies WAF cooldowns and short retry behavior without Selenium.
-- `test_rerun.py` — verifies deterministic structured rerun selection and summaries.
+- `test_description_cleaning.py` — checks product-description whitespace normalization.
+- `test_selenium_metrics.py` — checks that `record_result()` does not rebuild expensive summary statistics for every product.
+- `test_retries.py` — checks WAF cooldowns and short retry behavior without Selenium.
+- `test_rerun.py` — checks deterministic structured rerun selection and summaries.
 
 ## Design Notes
 
 - Run focused checks with `uv run python -m unittest discover -s tests -v`.
-- There is intentionally no live API or Chrome integration test in this folder; benchmark runs exercise that integration separately.
+- This folder intentionally has no live API or Chrome integration test. Benchmark runs cover that integration separately.

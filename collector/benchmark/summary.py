@@ -12,7 +12,7 @@ from utils.product import ProductRecord
 
 
 class AggregateSummary(TypedDict):
-    """JSON-compatible final summary written at the end of a crawl attempt."""
+    """JSON-compatible final summary written at the end of a collection attempt."""
 
     configuration: str
     total_elapsed_seconds: float

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "crawler"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
 
 from utils.product import clean_description
 

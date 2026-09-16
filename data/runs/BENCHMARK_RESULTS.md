@@ -1,4 +1,4 @@
-# Selenium Crawler Benchmark Results
+# Selenium Collector Benchmark Results
 
 This file keeps the benchmark history and the final stable 20,000-ID
 comparison in one place. All tests use persistent Chrome sessions,
